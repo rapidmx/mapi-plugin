@@ -463,7 +463,11 @@ describe("RopDeleteFolderHandler Tests", () => {
     it("Pages through more than 100 items, and stops with PartialCompletion once MAX_ITEMS_PER_DELETE is spent, keeping the folder.", async () => {
         const page = (offset: number) => Array.from({ length: 1000 }, (_, i) => ({ uid: `m${offset + i}` }));
         const messageFind = vi.fn().mockImplementation((query: { page: number }) => Promise.resolve(page(query.page * 1000)));
-        const context = makeContext({ messageRepo: { find: messageFind, delete: vi.fn().mockResolvedValue(undefined) } as any });
+        const notifyFolderCounts = vi.fn().mockResolvedValue(undefined);
+        const context = makeContext({
+            notifyFolderCounts,
+            messageRepo: { find: messageFind, delete: vi.fn().mockResolvedValue(undefined) } as any,
+        });
         context.session.handles[5] = { type: "folder", entityUid: "folder:parent" };
         context.session.folderIds = { "1": "folder:target" };
         const writer = new BufferWriter();
@@ -477,5 +481,25 @@ describe("RopDeleteFolderHandler Tests", () => {
         expect(response.readUInt8()).toBe(1); // PartialCompletion
         expect((context.messageRepo as any).delete).toHaveBeenCalledTimes(MAX_ITEMS_PER_DELETE);
         expect((context.folderRepo as any).delete).not.toHaveBeenCalled();
+        // The folder itself survives the partial delete (never reached the `folderRepo.delete` call above), so unlike
+        // a folder that's fully deleted below, its now-stale message count must be refreshed instead of left behind.
+        expect(notifyFolderCounts).toHaveBeenCalledTimes(1);
+        expect(notifyFolderCounts).toHaveBeenCalledWith(["target"]);
+    });
+
+    it("Never refreshes a fully-deleted folder's counts - it no longer exists to refresh.", async () => {
+        const notifyFolderCounts = vi.fn().mockResolvedValue(undefined);
+        const context = makeContext({
+            notifyFolderCounts,
+            messageRepo: { find: vi.fn().mockResolvedValue([{ uid: "m1" }]), delete: vi.fn().mockResolvedValue(undefined) } as any,
+        });
+        context.session.handles[5] = { type: "folder", entityUid: "folder:parent" };
+        context.session.folderIds = { "1": "folder:target" };
+        const writer = new BufferWriter();
+
+        await new RopDeleteFolderHandler().handle(new BufferReader(buildRequest({ deleteFolderFlags: DEL_MESSAGES })), writer, context);
+
+        expect((context.folderRepo as any).delete).toHaveBeenCalledWith("target", { ignoreACL: true });
+        expect(notifyFolderCounts).not.toHaveBeenCalled();
     });
 });

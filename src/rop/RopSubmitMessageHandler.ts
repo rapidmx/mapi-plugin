@@ -245,6 +245,8 @@ export class RopSubmitMessageHandler implements RopHandler {
                 }),
                 { ignoreACL: true },
             );
+            // Adding a message to a folder always bumps its sync key too - see `refreshFolderCounts()`'s own doc comment.
+            await context.notifyFolderCounts?.([outbox.uid], { bumpSyncKey: true });
 
             writer.writeUInt8(ROP_ID_SUBMIT_MESSAGE);
             writer.writeUInt8(inputHandleIndex);
@@ -281,6 +283,8 @@ export class RopSubmitMessageHandler implements RopHandler {
             }),
             { ignoreACL: true },
         );
+        // Adding a message to a folder always bumps its sync key too - see `refreshFolderCounts()`'s own doc comment.
+        await context.notifyFolderCounts?.([sentFolder.uid], { bumpSyncKey: true });
 
         writer.writeUInt8(ROP_ID_SUBMIT_MESSAGE);
         writer.writeUInt8(inputHandleIndex);

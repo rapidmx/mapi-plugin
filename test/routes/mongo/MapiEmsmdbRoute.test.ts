@@ -1625,6 +1625,52 @@ describe("Route:MapiEmsmdbRouteMongo Tests", () => {
             expect(entries).toHaveLength(1);
             expect(entries[0]).toMatchObject({ action: "message.delete", targetType: "Message", mailboxUid: mailbox.uid, actorUserUid: owner.uid });
         });
+
+        it("Refreshes the source folder's stored unreadCount/totalCount after RopDeleteMessages, and publishes a Folder update event.", async () => {
+            const mailbox = await createMailbox(owner.uid);
+            const inbox = await createFolder(mailbox.uid, FolderType.INBOX, "Inbox");
+            const unreadFlags = { read: false, flagged: false, answered: false, forwarded: false };
+            await createMessage(mailbox.uid, inbox.uid, { subject: "Keep Unread", flags: unreadFlags });
+            await createMessage(mailbox.uid, inbox.uid, { subject: "Delete Me Too", flags: unreadFlags });
+            const connectResult = await connect();
+            const cookie = cookieHeaderFrom(connectResult.headers["set-cookie"]);
+
+            const logonResult = await execute(cookie, encodeRopBuffer({ ropsList: buildLogonRops(0), handleTable: [0xffffffff] }));
+            const logonReader = new BufferReader(logonResult.body);
+            logonReader.readBytes(12);
+            const logonRops = new BufferReader(decodeRopBuffer(logonReader.readBytes(logonReader.readUInt32LE())).ropsList);
+            logonRops.readBytes(7);
+            logonRops.readBytes(8 * 4); // Root, Deferred Action, Spooler Queue, IPM Subtree
+            const inboxFid = logonRops.readBigUInt64LE();
+
+            await execute(cookie, encodeRopBuffer({ ropsList: buildOpenFolderRops(0, 1, inboxFid), handleTable: [0xffffffff, 0xffffffff] }));
+            await execute(cookie, encodeRopBuffer({ ropsList: buildGetContentsTableRops(1, 2), handleTable: [0xffffffff, 0xffffffff, 0xffffffff] }));
+            await execute(cookie, encodeRopBuffer({ ropsList: buildSetColumnsRops(2, [{ propertyId: 0x674a, propertyType: PropertyType.PtypInteger64 }]), handleTable: [0xffffffff] }));
+            const rowsResult = await execute(cookie, encodeRopBuffer({ ropsList: buildQueryRowsRops(2, 10), handleTable: [0xffffffff] }));
+            const rowsReader = new BufferReader(rowsResult.body);
+            rowsReader.readBytes(12);
+            const rows = new BufferReader(decodeRopBuffer(rowsReader.readBytes(rowsReader.readUInt32LE())).ropsList);
+            rows.readBytes(7);
+            expect(rows.readUInt16LE()).toBe(2); // both messages
+            rows.readUInt8();
+            const firstMid = readPropertyValue(rows, PropertyType.PtypInteger64) as bigint;
+
+            // Only one of the two unread messages is deleted - the folder still holds the other, still unread.
+            const deleteRops = new BufferWriter().writeUInt8(0x1e).writeUInt8(0).writeUInt8(1).writeUInt8(0).writeUInt8(0).writeUInt16LE(1).writeBigUInt64LE(firstMid).toBuffer();
+            const deleteResult = await execute(cookie, encodeRopBuffer({ ropsList: deleteRops, handleTable: [0xffffffff] }));
+            const deleteReader = new BufferReader(deleteResult.body);
+            deleteReader.readBytes(12);
+            const deleteResponse = new BufferReader(decodeRopBuffer(deleteReader.readBytes(deleteReader.readUInt32LE())).ropsList);
+            deleteResponse.readBytes(2);
+            expect(deleteResponse.readUInt32LE()).toBe(0);
+            expect(deleteResponse.readUInt8()).toBe(0); // PartialCompletion
+
+            // Without RopDeleteMessagesHandler refreshing the folder's cached counts, these would stay at
+            // createFolder()'s placeholder (0/0) forever - never reflecting either the 2 messages filed or the 1 left.
+            const stored: any = await folderRepo.findOne({ uid: inbox.uid } as any);
+            expect(stored?.totalCount).toBe(1);
+            expect(stored?.unreadCount).toBe(1);
+        });
     });
 
     describe("Message categories (PidNameKeywords / Outlook Categories, backed by Message.labelUids)", () => {
@@ -2095,6 +2141,14 @@ describe("Route:MapiEmsmdbRouteMongo Tests", () => {
             expect(sentMessages[0].recipients).toEqual([{ address: "recipient@example.com", type: RecipientType.TO }]);
             const savedRaw = await blobStore().get(sentMessages[0].bodyBlobKey);
             expect(savedRaw.toString("utf-8")).toContain(bodyText);
+
+            // RopSubmitMessageHandler must refresh the Sent Items folder's cached counts after filing the copy above -
+            // otherwise Outlook's own folder pane, which reads Folder.totalCount/unreadCount directly, never learns
+            // this mailbox's Sent Items now holds a message.
+            const sentFolder: any = await folderRepo.findOne({ uid: sentMessages[0].folderUid } as any);
+            expect(sentFolder?.type).toBe(FolderType.SENT_ITEMS);
+            expect(sentFolder?.totalCount).toBe(1);
+            expect(sentFolder?.unreadCount).toBe(0); // a sender's own Sent Items copy is always already "read"
         });
     });
 

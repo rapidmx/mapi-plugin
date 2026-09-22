@@ -71,13 +71,19 @@ export class RopDeleteMessagesHandler implements RopHandler {
         }
 
         let partialCompletion = false;
+        // The folders that lost a message - refreshed once below, after the loop, rather than once per message (a
+        // client can name several `MessageId`s in one call, several of which are often the same folder).
+        const affectedFolderUids = new Set<string>();
         for (const messageId of messageIds) {
             const target: string | undefined = context.session.messageIds[messageId.toString()];
             if (target?.startsWith("message:")) {
                 const uid = target.slice("message:".length);
-                const message = context.audit ? await context.messageRepo.findOne(uid, { ignoreACL: true }) : undefined;
+                // Always fetched now (not just when `context.audit` is set): `notifyFolderCounts` below needs to know
+                // which folder this message was in, the same as `auditMessageDelete` already needed its subject.
+                const message = await context.messageRepo.findOne(uid, { ignoreACL: true });
                 await context.messageRepo.delete(uid, { ignoreACL: true });
                 if (message) {
+                    affectedFolderUids.add(message.folderUid);
                     await auditMessageDelete(context, message);
                 }
             } else if (target?.startsWith("calendarEvent:")) {
@@ -86,6 +92,9 @@ export class RopDeleteMessagesHandler implements RopHandler {
                 partialCompletion = true;
             }
         }
+        // Not `bumpSyncKey` - only adding a message to a folder does that (see `refreshFolderCounts()`'s own doc
+        // comment); a deletion doesn't, matching restapi's own `ScanQueueJob.processRecall()` deletion call site.
+        await context.notifyFolderCounts?.(affectedFolderUids);
 
         writer.writeUInt8(ROP_ID_DELETE_MESSAGES);
         writer.writeUInt8(inputHandleIndex);

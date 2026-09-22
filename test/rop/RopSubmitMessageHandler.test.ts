@@ -449,6 +449,42 @@ describe("RopSubmitMessageHandler Tests", () => {
         expect(savedMessage.scheduledSendTime).toEqual(future);
     });
 
+    it("Refreshes the Outbox folder's counts, bumping its sync key, when deferred instead of sent.", async () => {
+        const notifyFolderCounts = vi.fn().mockResolvedValue(undefined);
+        const context = makeContext({
+            notifyFolderCounts,
+            folderRepo: { find: vi.fn().mockResolvedValue([{ uid: "outbox-uid", type: FolderType.OUTBOX }]) } as any,
+        });
+        const future = new Date(Date.now() + 60 * 60 * 1000);
+        context.session.handles[5] = {
+            type: "message",
+            entityUid: "",
+            draftProperties: { "55": "Later", "3588": "to@example.com", "16367": future.toISOString() },
+        };
+        const handler = new RopSubmitMessageHandler();
+        const writer = new BufferWriter();
+
+        await handler.handle(new BufferReader(buildRequest({})), writer, context);
+
+        expect(writer.toBuffer().readUInt32LE(2)).toBe(0); // ReturnValue - success
+        expect(notifyFolderCounts).toHaveBeenCalledTimes(1);
+        expect(notifyFolderCounts).toHaveBeenCalledWith(["outbox-uid"], { bumpSyncKey: true });
+    });
+
+    it("Refreshes the Sent Items folder's counts, bumping its sync key, after a successful send.", async () => {
+        const notifyFolderCounts = vi.fn().mockResolvedValue(undefined);
+        const context = makeContext({ notifyFolderCounts });
+        context.session.handles[5] = { type: "message", entityUid: "", draftProperties: { "55": "Hi", "3588": "to@example.com" } };
+        const handler = new RopSubmitMessageHandler();
+        const writer = new BufferWriter();
+
+        await handler.handle(new BufferReader(buildRequest({})), writer, context);
+
+        expect(writer.toBuffer().readUInt32LE(2)).toBe(0); // ReturnValue - success
+        expect(notifyFolderCounts).toHaveBeenCalledTimes(1);
+        expect(notifyFolderCounts).toHaveBeenCalledWith(["sent-uid"], { bumpSyncKey: true });
+    });
+
     it("Sends immediately when PidTagDeferredSendTime is already in the past.", async () => {
         const context = makeContext();
         const past = new Date(Date.now() - 60 * 60 * 1000);

@@ -728,7 +728,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@rapidmx/mapi-plugin@workspace:."
   dependencies:
-    "@rapidmx/restapi": "npm:^0.10.0"
+    "@rapidmx/restapi": "npm:^0.17.0"
     "@rapidrest/core": "npm:^5.2.2"
     "@rapidrest/service-core": "npm:^2.1.0"
     "@swc/core": "npm:^1.16.2"
@@ -771,13 +771,14 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@rapidmx/restapi@npm:^0.10.0":
-  version: 0.10.0
-  resolution: "@rapidmx/restapi@npm:0.10.0"
+"@rapidmx/restapi@npm:^0.17.0":
+  version: 0.17.0
+  resolution: "@rapidmx/restapi@npm:0.17.0"
   dependencies:
     "@peculiar/x509": "npm:^2.1.0"
     acme-client: "npm:^5.4.0"
     html-to-text: "npm:^10.0.1"
+    htmlparser2: "npm:^10.1.0"
     mailparser: "npm:^3.9.23"
     nodemailer: "npm:^10.0.1"
     pst-extractor: "npm:^1.12.0"
@@ -805,7 +806,7 @@ __metadata:
       optional: true
     pdf-parse:
       optional: true
-  checksum: 10c0/d19871ee146e1824047a6b5cccd8cd0e05257d09919853e41ecd180b279be7d3c0bf4c1889259badd7ab9a33efc7be49d4879210a4067a65c0437178ba6a59bf
+  checksum: 10c0/171eb0dec8af2df8c364c63f610a3daef9f0a86ee657fa0c89432456b0f019770988b646c26840c393b466c6744d5fe04e3817412536e8f901355c56ca6543de
   languageName: node
   linkType: hard
 

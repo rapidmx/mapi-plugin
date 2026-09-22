@@ -8,6 +8,7 @@ import {
     ApiErrors,
     HttpRequest,
     HttpResponse,
+    NotificationUtils,
     ObjectFactory,
     RepoUtils,
     RouteDecorators,
@@ -19,7 +20,16 @@ import { dispatchRops, ExecuteBufferTooSmallError, MAX_ROPS_LIST_BYTES } from ".
 import { handleDataOwners, type HandleDataStore } from "./rop/HandleDataCache.js";
 import { handleDataStoreOf, type RopContext, type RopHandler } from "./rop/RopHandler.js";
 import { ScanPipeline } from "@rapidmx/restapi/scan";
-import { Folder, Mailbox, RecoverableRepoUtils, recordAuditLog, resolveCallerMailboxUid, type BlobStore } from "@rapidmx/restapi";
+import {
+    Folder,
+    Mailbox,
+    RecoverableRepoUtils,
+    recordAuditLog,
+    refreshFolderCounts,
+    resolveCallerMailboxUid,
+    type BlobStore,
+    type FolderCountsContext,
+} from "@rapidmx/restapi";
 const { Config, Init, Inject, Logger } = ObjectDecorators;
 const { Auth, Post, Request, Response, User: AuthUser } = RouteDecorators;
 
@@ -151,6 +161,11 @@ export abstract class BaseMapiEmsmdbRoute<M extends Mailbox> {
 
     @Inject("MailTransport")
     private mailTransport?: any;
+
+    /** Publishes the live `Folder` counts-update event `refreshFolderCounts()` sends after a ROP handler changes what
+     * a folder holds through `context.messageRepo` directly - see `folderCountsContext()`/`RopContext.notifyFolderCounts`. */
+    @Inject(NotificationUtils)
+    private notificationUtils?: NotificationUtils;
 
     @Logger
     private logger: any;
@@ -415,6 +430,7 @@ export abstract class BaseMapiEmsmdbRoute<M extends Mailbox> {
                 ? (params) =>
                       recordAuditLog(this._objectFactory!, this.auditLogClass, { config: this.config, req, user, logger: this.logger }, params)
                 : undefined,
+            notifyFolderCounts: (folderUids, options) => refreshFolderCounts(this.folderCountsContext(), folderUids, options),
         };
         // RopSize (2 bytes) and the echoed handle table share MaxRopOut with the ROP responses. dispatchRops only throws
         // for a request it can't decode (a failing ROP gets a failure response instead).
@@ -467,6 +483,19 @@ export abstract class BaseMapiEmsmdbRoute<M extends Mailbox> {
             delete running.requestId;
         }
         res.status(200).send(responseBody);
+    }
+
+    /** What `refreshFolderCounts()` (`@rapidmx/restapi`) needs to recompute, re-cache and publish a folder's counts -
+     * see `RopContext.notifyFolderCounts`'s own doc comment for why a ROP handler must call it after adding, deleting
+     * or moving a `Message` row through `context.messageRepo` itself. */
+    private folderCountsContext(): FolderCountsContext {
+        return {
+            messageRepo: this.messageRepo!,
+            folderRepo: this.folderRepo!,
+            folderClass: this.folderClass,
+            notificationUtils: this.notificationUtils,
+            logger: this.logger,
+        };
     }
 
     /** Writes an `Execute` failure body (no ROP buffer) with the given `X-ResponseCode` and `ErrorCode`. */

@@ -62,6 +62,19 @@ export interface RopContext {
     /** Records an audit log entry as the calling user, the same way the REST routes do. Optional like the repos
      * above: absent when the route has no audit log class configured, in which case nothing is recorded. */
     audit?: (params: AuditLogParams) => Promise<void>;
+    /** Recomputes, re-caches and publishes the given folders' `unreadCount`/`totalCount` - restapi's
+     * `refreshFolderCounts()` (`@rapidmx/restapi`), bound to this route's own `messageRepo`/`folderRepo`/`folderClass`/
+     * `notificationUtils`. `Folder.unreadCount`/`totalCount` are a cache restapi's own writes keep fresh (see
+     * `FolderCountUtils.ts`'s module doc comment); a handler that adds, deletes or moves a `Message` row through
+     * `context.messageRepo` itself - never through a `BaseFolderRoute`/`BaseMessageRoute` this library already refreshes
+     * after - must call this for every folder it touched, or Outlook's own folder pane (which reads
+     * `PidTagContentCount`/`PidTagContentUnreadCount` straight off the stored fields, not derived on read - see
+     * `PropertyResolvers.ts`/`FolderTarget.ts`) goes stale. `bumpSyncKey` should be `true` when a message was added to a
+     * folder (restapi's own convention - see `refreshFolderCounts()`'s doc comment), and left unset for a plain
+     * deletion or status change. Always present in real use (`BaseMapiEmsmdbRoute.dispatch()` populates it
+     * unconditionally); optional here only so existing `RopContext`-literal test fixtures that predate this need no
+     * new field, the same reasoning `contactRepo`/`taskRepo`/`labelRepo` above already documents. */
+    notifyFolderCounts?: (folderUids: Iterable<string | undefined | null>, options?: { bumpSyncKey?: boolean }) => Promise<void>;
     /** Shared storage for FastTransfer streams and write-stream chunks. Absent in unit tests, where
      * `defaultHandleDataStore` (this process only) is used - see `handleDataStoreOf`. */
     handleData?: HandleDataStore;

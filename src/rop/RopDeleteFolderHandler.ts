@@ -112,6 +112,12 @@ export class RopDeleteFolderHandler implements RopHandler {
         for (const folderUid of folders) {
             if (!(await this.deleteItems(folderUid, context, budget))) {
                 partialCompletion = true;
+                // Every folder deleted below (this loop's earlier iterations) is gone outright - nothing to refresh.
+                // This one is different: it survives (the budget ran out before `deleteItems` could empty it, so it's
+                // never reached below), but `itemRepos()` always drains `context.messageRepo` for a folder before any
+                // other repo, so some or all of its messages may already be gone - its stored counts must be
+                // refreshed rather than left counting messages that no longer exist.
+                await context.notifyFolderCounts?.([folderUid]);
                 break;
             }
             context.budget?.chargeQueries();

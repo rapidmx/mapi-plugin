@@ -33,7 +33,10 @@ function makeContext(overrides: Partial<RopContext> = {}): RopContext {
         userUid: "user-1",
         session: new MapiSessionContext({ mailboxUid: "mailbox-1", userUid: "user-1" }),
         folderRepo: {} as any,
-        messageRepo: { delete: vi.fn().mockResolvedValue(undefined) } as any,
+        // `findOne` is now called unconditionally (notifyFolderCounts needs the deleted message's folderUid, the
+        // same as auditMessageDelete already needed its subject) - defaults to "not found" so a test that doesn't
+        // care about the looked-up message (most below) still gets a real message deleted without extra setup.
+        messageRepo: { findOne: vi.fn().mockResolvedValue(undefined), delete: vi.fn().mockResolvedValue(undefined) } as any,
         calendarEventRepo: { delete: vi.fn().mockResolvedValue(undefined) } as any,
         mailboxRepo: {} as any,
         folderClass: {} as any,
@@ -139,6 +142,60 @@ describe("RopDeleteMessagesHandler Tests", () => {
             mailboxUid: "mailbox-1",
             details: { subject: "Bye", folderUid: "f1" },
         });
+    });
+
+    it("Refreshes the deleted message's folder counts once, without bumping the sync key.", async () => {
+        const notifyFolderCounts = vi.fn().mockResolvedValue(undefined);
+        const context = makeContext({
+            notifyFolderCounts,
+            messageRepo: {
+                findOne: vi.fn().mockResolvedValue({ uid: "m1", mailboxUid: "mailbox-1", subject: "Bye", folderUid: "f1" }),
+                delete: vi.fn().mockResolvedValue(undefined),
+            } as any,
+        });
+        context.session.handles[5] = { type: "folder", entityUid: "folder:f1" };
+        context.session.messageIds = { "1": "message:m1" };
+
+        await new RopDeleteMessagesHandler().handle(new BufferReader(buildRequest({ messageIds: [1n] })), new BufferWriter(), context);
+
+        expect(notifyFolderCounts).toHaveBeenCalledTimes(1);
+        expect([...notifyFolderCounts.mock.calls[0][0]]).toEqual(["f1"]);
+        expect(notifyFolderCounts.mock.calls[0][1]).toBeUndefined();
+    });
+
+    it("Refreshes each distinct folder exactly once for several messages deleted from (possibly) different folders.", async () => {
+        const notifyFolderCounts = vi.fn().mockResolvedValue(undefined);
+        const messages: Record<string, { uid: string; mailboxUid: string; folderUid: string }> = {
+            m1: { uid: "m1", mailboxUid: "mailbox-1", folderUid: "f1" },
+            m2: { uid: "m2", mailboxUid: "mailbox-1", folderUid: "f1" },
+            m3: { uid: "m3", mailboxUid: "mailbox-1", folderUid: "f2" },
+        };
+        const context = makeContext({
+            notifyFolderCounts,
+            messageRepo: {
+                findOne: vi.fn().mockImplementation((uid: string) => Promise.resolve(messages[uid])),
+                delete: vi.fn().mockResolvedValue(undefined),
+            } as any,
+        });
+        context.session.handles[5] = { type: "folder", entityUid: "folder:f1" };
+        context.session.messageIds = { "1": "message:m1", "2": "message:m2", "3": "message:m3" };
+
+        await new RopDeleteMessagesHandler().handle(new BufferReader(buildRequest({ messageIds: [1n, 2n, 3n] })), new BufferWriter(), context);
+
+        expect(notifyFolderCounts).toHaveBeenCalledTimes(1);
+        expect(new Set(notifyFolderCounts.mock.calls[0][0])).toEqual(new Set(["f1", "f2"]));
+    });
+
+    it("Refreshes no folder when nothing was actually a real, still-existing message.", async () => {
+        const notifyFolderCounts = vi.fn().mockResolvedValue(undefined);
+        const context = makeContext({ notifyFolderCounts, calendarEventRepo: { delete: vi.fn().mockResolvedValue(undefined) } as any });
+        context.session.handles[5] = { type: "folder", entityUid: "folder:cal1" };
+        context.session.messageIds = { "1": "calendarEvent:evt1" };
+
+        await new RopDeleteMessagesHandler().handle(new BufferReader(buildRequest({ messageIds: [1n] })), new BufferWriter(), context);
+
+        expect(notifyFolderCounts).toHaveBeenCalledTimes(1);
+        expect([...notifyFolderCounts.mock.calls[0][0]]).toEqual([]);
     });
 
     it("Handles an empty MessageIds list, reporting success with PartialCompletion=false.", async () => {
