@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.5] - 2026-09-22
+
+### Changed
+- Bump the @rapidmx/restapi devDependency to ^0.17.0, since the folder count helpers this fix calls were added well after the ^0.10.0 this plugin was still pinned to in development
+- Test every refresh site, including a real Mongo round trip proving a deleted message's folder ends with the right counts
+- Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+### Fixed
+- Fixed Outlook's own folder pane showing stale unread and total counts after deleting mail, sending mail, or deleting a folder over MAPI, by refreshing and publishing restapi's derived folder counts after every write that changes a folder's messages - message delete, a folder deleted mid-way through its own item budget, and both the Outbox and Sent Items copies a submit creates
+
 ## [1.0.0-beta.4] - 2026-09-15
 
 ### Changed
@@ -151,7 +161,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 - Removed unused files
 
-[Unreleased]: https://github.com/RapidMX/mapi/compare/v1.0.0-beta.4...HEAD
+[Unreleased]: https://github.com/RapidMX/mapi/compare/v1.0.0-beta.5...HEAD
+[1.0.0-beta.5]: https://github.com/RapidMX/mapi/compare/v1.0.0-beta.4...v1.0.0-beta.5
 [1.0.0-beta.4]: https://github.com/RapidMX/mapi/compare/v1.0.0-beta.3...v1.0.0-beta.4
 [1.0.0-beta.3]: https://github.com/RapidMX/mapi/compare/v1.0.0-beta.2...v1.0.0-beta.3
 [1.0.0-beta.2]: https://github.com/RapidMX/mapi/compare/v1.0.0-beta.1...v1.0.0-beta.2
