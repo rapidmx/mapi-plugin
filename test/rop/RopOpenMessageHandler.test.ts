@@ -153,6 +153,22 @@ describe("RopOpenMessageHandler Tests", () => {
         expect((context.taskRepo as any).findOne).toHaveBeenCalledWith("t1", { ignoreACL: true });
     });
 
+    it("Opens a task target as an empty subject when taskRepo is absent from the context.", async () => {
+        const context = makeContext({ "1": "task:t1" });
+        const handler = new RopOpenMessageHandler();
+        const writer = new BufferWriter();
+
+        await handler.handle(new BufferReader(buildRequest({ outputHandleIndex: 5, messageId: 1n })), writer, context);
+
+        const response = new BufferReader(writer.toBuffer());
+        response.readUInt8();
+        response.readUInt8();
+        response.readUInt32LE();
+        response.readUInt8();
+        expect(readTypedString(response)).toBeUndefined(); // SubjectPrefix
+        expect(readTypedString(response)).toBe(""); // NormalizedSubject falls back to empty
+    });
+
     it("Returns MAPI_E_NOT_FOUND for an unrecognized MID, without creating a handle.", async () => {
         const context = makeContext({});
         const handler = new RopOpenMessageHandler();

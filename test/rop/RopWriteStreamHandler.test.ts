@@ -84,4 +84,13 @@ describe("RopWriteStreamHandler Tests", () => {
         expect(accumulated).toEqual(fullBytes);
         expect(accumulated.toString("utf16le").replace(/\0+$/, "")).toBe(fullText);
     });
+
+    it("Reads back an empty buffer for a write-stream handle nothing has been written to yet (writeSize defaults to 0).", async () => {
+        const context = makeContext();
+        context.session.handles[6] = { type: "stream", entityUid: "", generation: "never-written", writeTargetHandleIndex: 3 };
+
+        const result = await readWriteStream(context, 6, context.session.handles[6]);
+
+        expect(result).toEqual(Buffer.alloc(0));
+    });
 });

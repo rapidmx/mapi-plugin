@@ -652,3 +652,51 @@ changes. 707 tests pass (was 680); coverage 100% statements/functions/lines, 98.
   with nothing stored, ReadStream -> RopBufferTooSmall replayed from the store, meeting invite flow) and a SQL invite flow.
 - Lesson: mongo route test's renewal test needs a real `setTimeout` pause after the fake ticks, since renewals are now
   sequential and the request can finish before the second one runs.
+
+### 2026-09-22 — Round-7 review fix (RopDeleteMessages budget) + targeted coverage pass
+
+One finding, confirmed real; not a re-litigation of anything above. Not committed as a version bump - `RELEASE_NOTES.md`
+flipped back to `## Unreleased`. 725 tests pass (was 707 before this session's own two new test files plus additions to
+five existing ones); coverage 100% statements/functions/lines, 99.34% branches (was 98.97%); `yarn lint` and
+`npx tsc --noEmit -p .` clean.
+
+- **MEDIUM: `RopDeleteMessagesHandler` had zero `ExecuteBudget` accounting**, the only bulk-mutation ROP round 5's
+  work-budget pass missed - `RopDeleteFolderHandler.deleteItems()` and every paged query already charge
+  `context.budget?.chargeQueries()` per DB round trip, but the per-`MessageId` loop here (`findOne` + `delete`, or a
+  bare `delete` for a `calendarEvent:` target) never did, so a client could still walk ~4000 sequential DB round
+  trips per `Execute` (a 32767-byte ROP buffer holds that many 8-byte `MessageId`s) against their own mailbox with no
+  budget stopping it. Fixed by charging one query before each `findOne`/`delete` call, matching
+  `resolveContentsKind`'s own single-row-lookup charge and `RopDeleteFolderHandler.deleteItems()`'s own per-delete
+  charge exactly (a `WorkBudgetExceededError` thrown mid-loop propagates out of `handle()` uncaught, same as
+  `RopDeleteFolderHandler`'s own direct-call budget test, and `dispatchRops` turns it into `MAPI_E_TOO_COMPLEX` for
+  that ROP when reached through `Execute`). New test mirrors `Round5Review.test.ts`'s "the second delete never ran"
+  case: a 3-query budget spends 2 on the first message (findOne+delete) and the third on the second message's findOne,
+  leaving nothing for its delete, which throws `WorkBudgetExceededError`.
+- **Coverage, all targeted gaps from an adversarial review pass, not a general sweep**:
+  - `BaseMapiEmsmdbRoute.ts`'s `executeLocked()` rethrows whatever `dispatchRops` rejects with when it isn't a
+    `DecodeError`/`ExecuteBufferTooSmallError` - untested because `dispatchRops` itself converts every ordinary
+    handler-thrown error into a per-ROP failure response internally (see `RopDispatcher.test.ts`'s own handler-throws
+    coverage) and never lets it escape. The one real way it *can* escape: `failureResponse()` (called from inside
+    `dispatchRops`'s per-ROP catch, itself inside an outer try with only a `finally`, no enclosing catch) throws while
+    building that failure response - e.g. a `RopHandler` whose `failureTailBytes` getter throws. New real-HTTP test in
+    `test/routes/mongo/MapiEmsmdbRoute.test.ts` pokes a broken handler with exactly that shape into the route's own
+    `ropHandlers` map (private is compile-time only) and confirms `Execute` answers a generic 500
+    (`serializeError`'s non-`ApiError` fallback), not a raw leak or a crash.
+  - The `this.auditLogClass ? ... : undefined` ternary's false side (no audit log class configured) has no real
+    route to exercise it, since both concrete routes (`MapiEmsmdbRouteMongo`/`SQL`) always set one. New
+    `test/server-mongo/routes/MapiEmsmdbRouteNoAudit.ts` mounts a second, otherwise-identical Mongo route at
+    `/mongo/mapi/emsmdb-noaudit` with `auditLogClass` left unset, and a new test does a bare Connect+Execute against
+    it (any Execute exercises the ternary, regardless of which ROP runs).
+  - `TransportSend.ts`'s `sendOrThrow` had no dedicated test file at all despite being its own module (only exercised
+    indirectly through `MeetingMessageClassHandler.test.ts`). New `test/rop/TransportSend.test.ts` covers all of it:
+    no result, empty `accepted`, non-empty `rejected`, success, and the `?? []` fallback on each field when it's
+    absent from the result object entirely (not just empty).
+  - `RopOpenMessageHandler.ts`: the `context.taskRepo ? ... : ""` branch's false side (task-repo absent from the
+    context) had no test, unlike the identical pattern one line up for `contactRepo` - added the mirrored test.
+  - `RopWriteStreamHandler.ts`'s exported `readWriteStream()`: `stream.writeSize ?? 0` had no test for a handle
+    nothing has ever been written to (`writeSize` genuinely `undefined`, not just `0`) - added a test asserting it
+    reads back an empty buffer rather than needing a prior write.
+  - Left alone (out of this pass's scope, not newly discovered): `RopDispatcher.ts` line 58's other
+    `decodingReader` branch, `PropertyResolvers.ts` lines 395-397, and `BaseMapiEmsmdbRoute.ts` lines 90/301/362/407/520
+    - pre-existing single-line branch gaps this review didn't call out specifically; the branch floor (95%) was
+    already comfortably cleared before and after this session regardless.

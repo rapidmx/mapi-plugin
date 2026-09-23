@@ -26,6 +26,8 @@ import { PropertyType, readPropertyValue, writePropertyTag, writeTaggedPropertyV
 import { decodeRopBuffer, encodeRopBuffer } from "../../../src/codec/RopBuffer.js";
 import { MapiSessionManager, SESSION_LOCK_RENEW_MS } from "../../../src/MapiSessionManager.js";
 import { handleDataCache, handleDataKey, MemoryHandleDataStore } from "../../../src/rop/HandleDataCache.js";
+import type { RopHandler } from "../../../src/rop/RopHandler.js";
+import { MapiEmsmdbRoute } from "../../server-mongo/routes/MapiEmsmdbRoute.js";
 
 const mongod: MongoMemoryServer = new MongoMemoryServer({
     instance: {
@@ -399,6 +401,73 @@ describe("Route:MapiEmsmdbRouteMongo Tests", () => {
             } finally {
                 save.mockRestore();
             }
+        });
+
+        it("Answers 500, not a raw leak, when a ROP handler's own failure path throws something other than a DecodeError.", async () => {
+            // `dispatchRops` normally turns any non-DecodeError a handler's `handle()` throws into a per-ROP failure
+            // response (see RopDispatcher.test.ts) - it never escapes to the route. It CAN still escape if building
+            // that failure response itself throws (a broken handler whose `failureTailBytes` getter throws), which
+            // is exactly the "unexpected exception type" path BaseMapiEmsmdbRoute's own `executeLocked` re-throws
+            // rather than silently swallowing. Proves the route degrades to a generic 500 rather than crashing the
+            // process or leaking the raw error.
+            const route = objectFactory.getInstance(MapiEmsmdbRoute)!;
+            const brokenRopId = 0x77;
+            const brokenHandler: RopHandler = {
+                ropId: brokenRopId,
+                get failureTailBytes(): number {
+                    throw new Error("failureTailBytes exploded");
+                },
+                handle: async (reader) => {
+                    reader.readUInt8();
+                    throw new Error("handler exploded");
+                },
+            };
+            (route as any).ropHandlers.set(brokenRopId, brokenHandler);
+            try {
+                await createMailbox(owner.uid);
+                const cookie = cookieHeaderFrom((await connect()).headers["set-cookie"]);
+                const logon = new BufferWriter().writeUInt8(0xfe).writeUInt8(0).writeUInt8(0).writeUInt8(0x01).writeUInt32LE(0).writeUInt32LE(0).writeUInt16LE(0).toBuffer();
+
+                const result = await execute(cookie, encodeRopBuffer({ ropsList: Buffer.concat([logon, Buffer.from([brokenRopId, 0x00])]), handleTable: [0xffffffff] }));
+
+                expect(result.status).toBe(500);
+            } finally {
+                (route as any).ropHandlers.delete(brokenRopId);
+            }
+        });
+
+        it("Still answers a normal Execute when the route has no auditLogClass configured.", async () => {
+            // `MapiEmsmdbRouteNoAudit` (test/server-mongo/routes/MapiEmsmdbRouteNoAudit.ts) is otherwise identical to
+            // the real Mongo route, but leaves `auditLogClass` unset - both concrete routes (Mongo/SQL) always
+            // configure one for real, so `executeLocked()`'s `this.auditLogClass ? ... : undefined` ternary's false
+            // side (context.audit left undefined) has no other real-HTTP coverage.
+            const noAuditUrl = "/mongo/mapi/emsmdb-noaudit";
+            await createMailbox(owner.uid);
+            const connectResult = await mapiRequest(
+                server.getApplication(),
+                noAuditUrl,
+                { Authorization: "jwt " + ownerToken, "X-RequestType": "Connect", "Content-Type": "application/mapi-http" },
+                Buffer.alloc(0),
+            );
+            expect(connectResult.status).toBe(200);
+            const cookie = cookieHeaderFrom(connectResult.headers["set-cookie"]);
+
+            const ropBuffer = encodeRopBuffer({ ropsList: Buffer.alloc(0), handleTable: [] });
+            const body = new BufferWriter();
+            body.writeUInt32LE(0); // Flags
+            body.writeUInt32LE(ropBuffer.length);
+            body.writeBytes(ropBuffer);
+            body.writeUInt32LE(256 * 1024); // MaxRopOut
+            body.writeUInt32LE(0); // AuxiliaryBufferSize
+            const result = await mapiRequest(
+                server.getApplication(),
+                noAuditUrl,
+                { Authorization: "jwt " + ownerToken, "X-RequestType": "Execute", "Content-Type": "application/mapi-http", Cookie: cookie },
+                body.toBuffer(),
+            );
+
+            expect(result.status).toBe(200);
+            expect(result.headers["x-responsecode"]).toBe("0");
         });
 
         it("Holds ROP responses to MaxRopOut, answering RopBufferTooSmall for one that doesn't fit.", async () => {

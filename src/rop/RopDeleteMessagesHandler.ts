@@ -80,13 +80,19 @@ export class RopDeleteMessagesHandler implements RopHandler {
                 const uid = target.slice("message:".length);
                 // Always fetched now (not just when `context.audit` is set): `notifyFolderCounts` below needs to know
                 // which folder this message was in, the same as `auditMessageDelete` already needed its subject.
+                // Charged like `resolveContentsKind`'s own single-row lookup and `RopDeleteFolderHandler.deleteItems()`'s
+                // own per-item delete - each is a real DB round trip, so a client can't repeat this ROP with a large
+                // `messageIdCount` to run unbounded queries against its own mailbox within one `Execute`.
+                context.budget?.chargeQueries();
                 const message = await context.messageRepo.findOne(uid, { ignoreACL: true });
+                context.budget?.chargeQueries();
                 await context.messageRepo.delete(uid, { ignoreACL: true });
                 if (message) {
                     affectedFolderUids.add(message.folderUid);
                     await auditMessageDelete(context, message);
                 }
             } else if (target?.startsWith("calendarEvent:")) {
+                context.budget?.chargeQueries();
                 await context.calendarEventRepo.delete(target.slice("calendarEvent:".length), { ignoreACL: true });
             } else {
                 partialCompletion = true;

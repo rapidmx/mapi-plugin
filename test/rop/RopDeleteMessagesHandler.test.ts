@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
 import { BufferReader, BufferWriter } from "../../src/codec/BufferCursor.js";
+import { ExecuteBudget, WorkBudgetExceededError } from "../../src/rop/ExecuteBudget.js";
 import { RopDeleteMessagesHandler } from "../../src/rop/RopDeleteMessagesHandler.js";
 import type { RopContext } from "../../src/rop/RopHandler.js";
 import { MapiSessionContext } from "../../src/MapiSessionManager.js";
@@ -196,6 +197,34 @@ describe("RopDeleteMessagesHandler Tests", () => {
 
         expect(notifyFolderCounts).toHaveBeenCalledTimes(1);
         expect([...notifyFolderCounts.mock.calls[0][0]]).toEqual([]);
+    });
+
+    it("Charges the ExecuteBudget for each lookup/delete, stopping the loop once the query budget is spent.", async () => {
+        const messages: Record<string, { uid: string; mailboxUid: string; folderUid: string }> = {
+            m1: { uid: "m1", mailboxUid: "mailbox-1", folderUid: "f1" },
+            m2: { uid: "m2", mailboxUid: "mailbox-1", folderUid: "f1" },
+        };
+        const budget = new ExecuteBudget(undefined, undefined, { maxQueries: 3 });
+        const context = makeContext({
+            budget,
+            messageRepo: {
+                findOne: vi.fn().mockImplementation((uid: string) => Promise.resolve(messages[uid])),
+                delete: vi.fn().mockResolvedValue(undefined),
+            } as any,
+        });
+        context.session.handles[5] = { type: "folder", entityUid: "folder:f1" };
+        context.session.messageIds = { "1": "message:m1", "2": "message:m2" };
+
+        // m1's findOne+delete spend 2 of the 3 charges; m2's findOne spends the third, leaving nothing for its
+        // delete - mirrors `RopDeleteFolderHandler`'s own "the second delete never ran" budget-exhaustion test.
+        await expect(new RopDeleteMessagesHandler().handle(new BufferReader(buildRequest({ messageIds: [1n, 2n] })), new BufferWriter(), context)).rejects.toBeInstanceOf(
+            WorkBudgetExceededError,
+        );
+
+        expect((context.messageRepo as any).findOne).toHaveBeenCalledTimes(2);
+        expect((context.messageRepo as any).delete).toHaveBeenCalledTimes(1);
+        expect((context.messageRepo as any).delete).toHaveBeenCalledWith("m1", { ignoreACL: true });
+        expect(budget.queriesRemaining).toBe(-1); // the third charge (m2's findOne) hits 0; the attempted fourth (its delete) goes negative and throws
     });
 
     it("Handles an empty MessageIds list, reporting success with PartialCompletion=false.", async () => {
