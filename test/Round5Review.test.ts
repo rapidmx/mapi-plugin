@@ -155,6 +155,34 @@ describe("Budgeted paging", () => {
         await expect(resolveContentsKind("f1", makeContext({ folderRepo: folderRepo as any, budget: kindBudget }))).rejects.toBeInstanceOf(WorkBudgetExceededError);
     });
 
+    it("Charges RopDeleteFolder's audit write too, once context.audit is configured, undercounting real DB work otherwise.", async () => {
+        const folderRepo = { find: vi.fn().mockResolvedValue([]), delete: vi.fn(), findOne: vi.fn().mockResolvedValue({ type: FolderType.CONTACTS }) };
+        const messageRepo = { find: vi.fn().mockResolvedValueOnce([{ uid: "m1", mailboxUid: "mailbox-1", folderUid: "f1" }]).mockResolvedValue([]), delete: vi.fn() };
+        const calendarEventRepo = { find: vi.fn().mockResolvedValue([]), delete: vi.fn() };
+        const audit = vi.fn().mockResolvedValue(undefined);
+        const budget = new ExecuteBudget();
+        const context = makeContext({ folderRepo: folderRepo as any, messageRepo: messageRepo as any, calendarEventRepo: calendarEventRepo as any, budget, audit });
+        context.session.handles[1] = { type: "folder", entityUid: "folder:parent" };
+        context.session.folderIds["20"] = "folder:f1";
+        const request = new BufferWriter().writeUInt8(0).writeUInt8(1).writeUInt8(0x05).writeBigUInt64LE(20n).toBuffer();
+
+        await new RopDeleteFolderHandler().handle(new BufferReader(request), new BufferWriter(), context);
+
+        expect(audit).toHaveBeenCalledTimes(1);
+        // The same 5 charges as the sibling test above, plus one more for the audit write m1's deletion now triggers.
+        expect(budget.queriesRemaining).toBe(MAX_QUERIES_PER_EXECUTE - 6);
+
+        // A 3-query budget covers collectSubtree, the message page and the message delete for m2, but not its
+        // audit write - proving the audit charge, not just the delete, can be what a tight budget runs out on.
+        const spent = makeContext({ folderRepo: folderRepo as any, messageRepo: messageRepo as any, calendarEventRepo: calendarEventRepo as any, audit, budget: new ExecuteBudget(undefined, undefined, { maxQueries: 3 }) });
+        spent.session.handles[1] = context.session.handles[1];
+        spent.session.folderIds["20"] = "folder:f1";
+        messageRepo.find.mockResolvedValueOnce([{ uid: "m2", mailboxUid: "mailbox-1", folderUid: "f1" }]);
+        await expect(new RopDeleteFolderHandler().handle(new BufferReader(request), new BufferWriter(), spent)).rejects.toBeInstanceOf(WorkBudgetExceededError);
+        expect(messageRepo.delete).toHaveBeenCalledTimes(2); // m1 (above) and m2 (here) both got deleted
+        expect(audit).toHaveBeenCalledTimes(1); // m2's audit write never ran - its charge is what threw
+    });
+
     it("Doesn't fetch a message body once the byte budget is gone, and charges the raw message before parsing it.", async () => {
         const blobStore = new InMemoryBlobStore();
         await blobStore.put("bodies/m1", Buffer.from(`Subject: Hi\r\n\r\n${"x".repeat(100)}`));

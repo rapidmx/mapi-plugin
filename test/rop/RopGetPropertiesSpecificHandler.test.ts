@@ -87,6 +87,31 @@ describe("RopGetPropertiesSpecificHandler Tests", () => {
         expect(response.hasMore()).toBe(false);
     });
 
+    it("Falls back to a type-appropriate default, not MAPI_E_CALL_FAILED, when a tag's requested PropertyType doesn't match what its propertyId actually resolves to.", async () => {
+        // The same round-3 review repro as RopQueryRowsHandler's own mirrored test: PidTagSubject requested as
+        // PtypGuid. messageValueFor resolves it to a plain string regardless of the client's requested type, and
+        // encodeGuid() throws on a non-GUID string - previously that escaped this handler entirely and failed
+        // the whole ROP with MAPI_E_CALL_FAILED instead of degrading just this one property.
+        const context = makeContext();
+        context.session.handles[5] = { type: "message", entityUid: "message:m1" };
+        context.messageRepo = {
+            findOne: vi.fn().mockResolvedValue({ uid: "m1", subject: "Not a GUID", flags: { read: true } }),
+        } as any;
+        const handler = new RopGetPropertiesSpecificHandler();
+        const writer = new BufferWriter();
+
+        const tags = [{ propertyId: 0x0037, propertyType: PropertyType.PtypGuid }]; // PidTagSubject requested as PtypGuid
+        await handler.handle(new BufferReader(buildRequest({ tags })), writer, context);
+
+        const response = new BufferReader(writer.toBuffer());
+        response.readUInt8();
+        response.readUInt8();
+        expect(response.readUInt32LE()).toBe(0); // ReturnValue - success, not MAPI_E_CALL_FAILED
+        response.readUInt8(); // PropertyRow Flags
+        expect(readPropertyValue(response, PropertyType.PtypGuid)).toBe("00000000-0000-0000-0000-000000000000");
+        expect(response.hasMore()).toBe(false);
+    });
+
     it("Fetches DisplayName for an open folder handle.", async () => {
         const context = makeContext();
         context.session.handles[5] = { type: "folder", entityUid: "folder:f1" };

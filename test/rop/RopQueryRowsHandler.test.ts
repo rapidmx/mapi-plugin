@@ -332,6 +332,39 @@ describe("RopQueryRowsHandler Tests", () => {
         expect(readPropertyValue(response, PropertyType.PtypString)).toBe("");
     });
 
+    it("Falls back to a type-appropriate default, not MAPI_E_CALL_FAILED, when a column's requested PropertyType doesn't match what its propertyId actually resolves to.", async () => {
+        // The repro a round-3 review gave: SetColumns([{propertyId: 0x0037 (PidTagSubject), propertyType: 0x0048
+        // (PtypGuid)}]) then QueryRows against a real message - messageValueFor's own switch resolves
+        // PidTagSubject to a plain string regardless of the client's requested type, and encodeGuid() throws on
+        // a non-GUID string. Before writePropertyValueSafely, that escaped RopQueryRowsHandler entirely and
+        // RopDispatcher failed the whole ROP with MAPI_E_CALL_FAILED, discarding every row already built.
+        const messageRepo = {
+            findOne: vi.fn().mockResolvedValue({ uid: "m1", subject: "Not a GUID", flags: { read: false }, hasAttachments: false, receivedDate: new Date() }),
+        };
+        const context = makeContext({}, messageRepo);
+        context.session.handles[7] = {
+            type: "table",
+            entityUid: "folder:top",
+            rows: ["message:m1"],
+            cursor: 0,
+            columns: [{ propertyId: 0x0037, propertyType: PropertyType.PtypGuid }], // PidTagSubject requested as PtypGuid
+        };
+        const handler = new RopQueryRowsHandler();
+        const writer = new BufferWriter();
+
+        await handler.handle(new BufferReader(buildRequest({})), writer, context);
+
+        const response = new BufferReader(writer.toBuffer());
+        response.readUInt8();
+        response.readUInt8();
+        expect(response.readUInt32LE()).toBe(0); // ReturnValue - success, not MAPI_E_CALL_FAILED
+        response.readUInt8();
+        expect(response.readUInt16LE()).toBe(1); // RowCount - the row was still built and returned
+        response.readUInt8(); // PropertyRow Flags
+        expect(readPropertyValue(response, PropertyType.PtypGuid)).toBe("00000000-0000-0000-0000-000000000000");
+        expect(response.hasMore()).toBe(false);
+    });
+
     it("Respects the requested RowCount, leaving remaining rows for a subsequent call.", async () => {
         const folderRepo = {
             findOne: vi.fn().mockImplementation(async (uid: string) => ({ uid, name: uid, unreadCount: 0, totalCount: 0 })),

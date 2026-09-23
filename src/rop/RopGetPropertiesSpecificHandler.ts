@@ -3,8 +3,8 @@
 // SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
 import type { BufferReader, BufferWriter } from "../codec/BufferCursor.js";
-import { readPropertyTagArray, writePropertyValue } from "../codec/PropertyValue.js";
-import { resolvePropertyValues } from "./PropertyResolvers.js";
+import { readPropertyTagArray } from "../codec/PropertyValue.js";
+import { resolvePropertyValues, writePropertyValueSafely } from "./PropertyResolvers.js";
 import type { RopContext, RopHandler } from "./RopHandler.js";
 
 const ROP_ID_GET_PROPERTIES_SPECIFIC = 0x07;
@@ -27,7 +27,10 @@ const ERROR_TOO_BIG = 0x80040305;
  * pragmatic subset always emits a `StandardPropertyRow` (`Flags = 0x00`, confirmed as the response's `RowData`
  * format via `[MS-OXCROPS]`'s own "Success Response Buffer" page, which names `[MS-OXCDATA]` §2.8's
  * `PropertyRow` structure directly) - an unsupported property falls back to a type-appropriate default rather
- * than a `FlaggedPropertyRow`'s per-column error signaling, exactly as `RopQueryRows` already does.
+ * than a `FlaggedPropertyRow`'s per-column error signaling, exactly as `RopQueryRows` already does. That includes
+ * a client-requested `propertyType` that doesn't match what a tag's own `propertyId` actually resolves to
+ * (`PropertyResolvers.writePropertyValueSafely`, shared with `RopQueryRowsHandler`) - not just a `propertyId`
+ * this codebase has no data for.
  *
  * `PropertySizeLimit`/`WantUnicode` are decoded (to advance the reader correctly) but not honored - this
  * pragmatic subset never truncates a property value and always encodes strings the same way regardless of the
@@ -59,6 +62,6 @@ export class RopGetPropertiesSpecificHandler implements RopHandler {
         writer.writeUInt8(inputHandleIndex);
         writer.writeUInt32LE(0); // ReturnValue - success
         writer.writeUInt8(0x00); // PropertyRow Flags - StandardPropertyRow, see class doc comment
-        propertyTags.forEach((tag, index) => writePropertyValue(writer, tag.propertyType, values[index]));
+        propertyTags.forEach((tag, index) => writePropertyValueSafely(writer, tag.propertyType, values[index]));
     }
 }

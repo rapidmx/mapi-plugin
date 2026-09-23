@@ -728,3 +728,78 @@ exactly once - the same shape as `RopDeleteMessagesHandler`'s own budget-exhaust
 line is exercised by both the new test and every existing bare-display-name-resolution test). `yarn lint`,
 `npx tsc --noEmit -p .` and `yarn build` all clean. Not a version bump - `RELEASE_NOTES.md` was already back at
 `## Unreleased` from the commit above.
+
+### 2026-09-23 — Round-3 review fixes (audit-write budget accounting, PropertyType-mismatch degradation)
+
+Two findings, both confirmed real before fixing; two others (`Disconnect`'s missing session lock, a `.last`
+Redis-key cleanup gap on session destroy) were reviewed and explicitly skipped as too low severity/self-inflicted-
+only per the coordinator's own triage. Not a version bump - `RELEASE_NOTES.md` stayed at `## Unreleased`. 734 tests
+pass (was 726); coverage 100% statements/functions/lines, 99.34% branches; `yarn lint`, `npx tsc --noEmit -p .` and
+`yarn build` all clean.
+
+- **MEDIUM: the audit write inside `RopDeleteMessagesHandler`/`RopDeleteFolderHandler`'s delete loops was the one
+  real DB round trip in each loop iteration left uncharged** - the same species of gap as the two fixed in the
+  commits above, just on `auditMessageDelete()`'s own `context.audit?.()` call (a real `create()` once
+  `auditLogClass` is configured, which every real deployment does) rather than the `findOne`/`delete` calls beside
+  it. `RopDeleteMessages` therefore cost 3 real DB round trips per message (`findOne`/`delete`/audit-`create`) but
+  only charged 2; `RopDeleteFolder` cost 2 per message (`delete`/audit-`create`) but only charged 1 - up to a 100%
+  undercount of real DB load relative to what `ExecuteBudget`'s own doc comment promises to cap.
+  - Fixed centrally rather than at each of the two call sites: `auditMessageDelete()` (`RopDeleteMessagesHandler.ts`,
+    shared by both handlers - see `RopDeleteFolderHandler.ts`'s own import) now charges
+    `context.budget?.chargeQueries()` itself, immediately before its own `context.audit(...)` call, and returns
+    early (no charge - there's no DB work to account for) when `context.audit` is absent. This was a deliberate
+    change from "add a charge at each call site" (what the finding's own wording suggested): the call is only
+    *sometimes* a real DB round trip (whether `context.audit` is configured), unlike the `delete()`/`findOne()`
+    calls beside it which always are, so an unconditional charge at each call site would have over-charged (and
+    broken) every existing no-audit-configured test that asserts an exact `queriesRemaining` count. Charging inside
+    the function itself is also the only single point that both current call sites (and any future one) get right
+    automatically, rather than needing the same `if (context.audit)` guard duplicated at each site.
+  - New tests: `test/rop/RopDeleteMessagesHandler.test.ts` ("Charges the audit write too...") - with a 3-query
+    budget and `audit` configured, the first message's `findOne`+`delete`+audit-`create` now spend all 3 charges
+    (not 2), so the *second* message's `findOne` is what throws, one message earlier than the sibling test right
+    above it with the same budget and no audit function. `test/Round5Review.test.ts` ("Charges RopDeleteFolder's
+    audit write too...") mirrors the existing "Charges RopDeleteFolder's walk and each delete..." test: with audit
+    configured the same scenario now spends 6 queries, not 5, and a 3-query budget lets `m2`'s `delete` run but
+    throws on its audit charge specifically (`messageRepo.delete` called twice, `audit` still only once) - proving
+    the audit charge, not just the delete, can be what a tight budget runs out on.
+- **LOW: a client-supplied `PropertyType` that doesn't match what a `propertyId`'s resolver actually returns failed
+  the *whole* `RopQueryRows`/`RopGetPropertiesSpecific` response with `MAPI_E_CALL_FAILED`**, discarding every row
+  already built, instead of degrading just that one column - breaking both handlers' own documented "an unsupported
+  property falls back to a type-appropriate default... never an error" contract, which was only ever actually true
+  for a `propertyId` with no resolver data, not for a `propertyId` that resolves fine but to a value shape the
+  *client's own requested* `propertyType` for that column doesn't accept. Root cause: every `xxxValueFor` function
+  in `PropertyResolvers.ts` switches purely on `propertyId` and has no idea what `propertyType` the client actually
+  asked for that column to be; the mismatch only surfaces later, in `PropertyValue.ts`'s `writePropertyValue()`
+  (`encodeGuid()` throwing on a plain string, for example), by which point `RopQueryRowsHandler`'s per-row loop and
+  `RopGetPropertiesSpecificHandler` have no try/catch around it, so the throw reaches `RopDispatcher` and fails the
+  whole ROP. Repro (as given): `SetColumns([{propertyId: 0x0037 (PidTagSubject), propertyType: 0x0048 (PtypGuid)}])`
+  then `QueryRows` against any mailbox with >= 1 message.
+  - Checked first, per the finding's own suggestion: `FlaggedPropertyRow`'s per-column error-flag mechanism isn't
+    implemented anywhere in this codebase (`RopQueryRowsHandler`'s own doc comment explicitly says so, and
+    confirmed via grep) - building it from scratch (per-column flag byte + `PropertyErrorCode` encoding, spec
+    compliance) was judged out of scope for a LOW-severity fix when the existing `defaultValueForType()` fallback
+    (already used for a wholly-unmodeled `propertyId`) is right there and already type-correct per `PropertyType`.
+  - Fix: new `PropertyResolvers.writePropertyValueSafely(writer, propertyType, value)` - encodes into a **scratch**
+    `BufferWriter` first, and only copies its bytes into the real `writer` once the whole value encoded cleanly;
+    falls back to encoding `defaultValueForType(propertyType)` (into its own fresh scratch writer) if the first
+    attempt throws. The scratch-writer indirection matters: `PtypBinary`/every `PtypMultiple*` case writes more than
+    one field per value (a count, then elements), and a wrong-*shaped* (not just wrong-type) value can throw
+    partway through one of those - writing directly into the real `writer` would leave stray, wrongly-sized bytes
+    ahead of every column/row that follows, corrupting the wire format worse than the original failure. Still
+    throws (unchanged from today) when even the fallback fails, which only happens when `propertyType` itself is a
+    raw value neither `switch` recognizes at all (`RopSetColumns` never validates `propertyType` against the known
+    enum) - there's no byte encoding this codec knows how to produce for a wire type it doesn't implement, so that
+    narrower, much rarer case is deliberately left as today's existing whole-ROP failure rather than invented on
+    the spot.
+  - `RopQueryRowsHandler.buildRow()` and `RopGetPropertiesSpecificHandler.handle()` both now call
+    `writePropertyValueSafely` instead of `writePropertyValue` directly; both class doc comments updated to state
+    the corrected, now-actually-true scope of their "never an error" claim.
+  - New tests: mirrored repro tests in `test/rop/RopQueryRowsHandler.test.ts` and
+    `test/rop/RopGetPropertiesSpecificHandler.test.ts` (PidTagSubject's string value requested as `PtypGuid`,
+    asserting `ReturnValue` 0 and the row/property still comes back, decoding to `defaultValueForType`'s GUID) plus
+    a direct `test/rop/PropertyResolvers.test.ts` unit-test block for `writePropertyValueSafely` itself: the
+    as-is-success path, the fallback path, a sentinel-byte test proving no stray partial-write bytes leak ahead of
+    the fallback's own bytes, and confirmation it still throws for a `propertyType` neither `switch` recognizes.
+- Skipped, per explicit instruction (not re-investigated further here): a missing session lock on `Disconnect`
+  (only lets a user race their own in-flight request; confirmed no cross-user impact) and a missing `.last`
+  Redis-key cleanup on session destroy (pure TTL-bounded hygiene, self-heals within `SESSION_LOCK_TTL_MS`).

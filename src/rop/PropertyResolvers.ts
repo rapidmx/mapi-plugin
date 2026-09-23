@@ -3,8 +3,9 @@
 // SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
 import { encodeAppointmentRecurrence } from "../codec/AppointmentRecurrence.js";
+import { BufferWriter } from "../codec/BufferCursor.js";
 import { encodeTimeZoneStruct } from "../codec/MapiTimeZone.js";
-import { PropertyType, PropertyValueData } from "../codec/PropertyValue.js";
+import { PropertyType, PropertyValueData, writePropertyValue } from "../codec/PropertyValue.js";
 import type { MapiSessionContext } from "../MapiSessionManager.js";
 import {
     BUSY_STATUS_CODES,
@@ -113,6 +114,43 @@ export function defaultValueForType(propertyType: PropertyType): PropertyValueDa
         default:
             return "";
     }
+}
+
+/**
+ * Encodes `value` as `propertyType` into `writer`, falling back to `defaultValueForType(propertyType)`'s own
+ * value if that throws - `RopQueryRowsHandler`/`RopGetPropertiesSpecificHandler`'s "an unsupported property
+ * falls back to a type-appropriate default, never an error" contract (see their own doc comments) was only true
+ * for a `propertyId` this codebase has no data for; it wasn't actually true for a `propertyId` it resolves fine
+ * whose value just doesn't fit the *client's own requested* `propertyType` for that column (`SetColumns` never
+ * cross-checks a column's declared type against what its resolver actually returns) - e.g. `PidTagSubject`'s
+ * plain string against a client-requested `PtypGuid` column throws inside `encodeGuid()`, well downstream of the
+ * `xxxValueFor` switch that only ever looks at `propertyId`. That escaped all the way to `RopDispatcher` and
+ * failed the *whole* ROP (discarding every row `RopQueryRows` had already built in that call) instead of just
+ * this one column degrading, the same as an actually-unmodeled property already does.
+ *
+ * Writes into a scratch `BufferWriter` first and only copies its bytes into `writer` once a whole value's worth
+ * encoded cleanly - several `PropertyType` cases (`PtypBinary`, every `PtypMultiple*`) write more than one field
+ * per value, and a value of the wrong *shape* (not just the wrong type) can throw partway through one of those,
+ * which would otherwise leave stray, wrongly-sized bytes in `writer` ahead of every column/row that follows -
+ * silent wire-format corruption worse than the original failure.
+ *
+ * `defaultValueForType(propertyType)` is built to match `writePropertyValue`'s own cases exactly, so the
+ * fallback only fails too when `propertyType` is a value neither function's `switch` recognizes at all (there's
+ * no way to encode a wire type this codec doesn't implement, and `RopSetColumns` never validates `propertyType`
+ * against the known enum) - that still throws, exactly as it already did before this function existed, since a
+ * genuinely unknown type isn't the "known type, mismatched value" case this exists to fix.
+ */
+export function writePropertyValueSafely(writer: BufferWriter, propertyType: PropertyType, value: PropertyValueData): void {
+    const scratch = new BufferWriter();
+    try {
+        writePropertyValue(scratch, propertyType, value);
+    } catch {
+        const fallback = new BufferWriter();
+        writePropertyValue(fallback, propertyType, defaultValueForType(propertyType));
+        writer.writeBytes(fallback.toBuffer());
+        return;
+    }
+    writer.writeBytes(scratch.toBuffer());
 }
 
 /** Resolves one requested property's value for a `"folder:<uid>"`/`"virtual:<name>"` target. */

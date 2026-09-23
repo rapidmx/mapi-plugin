@@ -3,11 +3,12 @@
 // SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
 import { encodeAppointmentRecurrence } from "../../src/codec/AppointmentRecurrence.js";
+import { BufferReader, BufferWriter } from "../../src/codec/BufferCursor.js";
 import { encodeTimeZoneStruct } from "../../src/codec/MapiTimeZone.js";
-import { PropertyType } from "../../src/codec/PropertyValue.js";
+import { PropertyType, readPropertyValue } from "../../src/codec/PropertyValue.js";
 import { MapiSessionContext } from "../../src/MapiSessionManager.js";
 import { assignOrGetNamedPropertyId } from "../../src/rop/NamedPropertyRegistry.js";
-import { calendarEventValueFor, contactValueFor, messageValueFor, resolvePropertyValues, taskValueFor } from "../../src/rop/PropertyResolvers.js";
+import { calendarEventValueFor, contactValueFor, defaultValueForType, messageValueFor, resolvePropertyValues, taskValueFor, writePropertyValueSafely } from "../../src/rop/PropertyResolvers.js";
 import type { CalendarEventTargetInfo } from "../../src/rop/CalendarEventTarget.js";
 import type { MessageTargetInfo } from "../../src/rop/MessageTarget.js";
 import type { ContactTargetInfo } from "../../src/rop/ContactTarget.js";
@@ -710,6 +711,42 @@ describe("PropertyResolvers Tests", () => {
             const values = await resolvePropertyValues("message:m1", [{ propertyId: keywordsId, propertyType: PropertyType.PtypMultipleString }], context);
 
             expect(values).toEqual([["Important"]]);
+        });
+    });
+
+    describe("writePropertyValueSafely Tests", () => {
+        it("Writes the value as-is when it already fits the requested PropertyType.", () => {
+            const writer = new BufferWriter();
+
+            writePropertyValueSafely(writer, PropertyType.PtypString, "Hello");
+
+            expect(readPropertyValue(new BufferReader(writer.toBuffer()), PropertyType.PtypString)).toBe("Hello");
+        });
+
+        it("Falls back to defaultValueForType() when the value doesn't fit the requested PropertyType, e.g. a plain string against PtypGuid.", () => {
+            const writer = new BufferWriter();
+
+            writePropertyValueSafely(writer, PropertyType.PtypGuid, "Not a GUID");
+
+            expect(readPropertyValue(new BufferReader(writer.toBuffer()), PropertyType.PtypGuid)).toBe(defaultValueForType(PropertyType.PtypGuid));
+        });
+
+        it("Never leaves stray bytes in writer from a failed attempt - only the fallback's own bytes are written.", () => {
+            const writer = new BufferWriter();
+            writer.writeUInt8(0xaa); // a sentinel byte written before the call, to prove nothing extra sneaks in ahead of it
+
+            writePropertyValueSafely(writer, PropertyType.PtypGuid, "Not a GUID");
+
+            const reader = new BufferReader(writer.toBuffer());
+            expect(reader.readUInt8()).toBe(0xaa);
+            expect(readPropertyValue(reader, PropertyType.PtypGuid)).toBe(defaultValueForType(PropertyType.PtypGuid));
+            expect(reader.hasMore()).toBe(false); // exactly 16 more bytes (one GUID), nothing left over from a partial first attempt
+        });
+
+        it("Still throws when even the type-appropriate default can't be encoded, e.g. a PropertyType neither switch recognizes at all.", () => {
+            const writer = new BufferWriter();
+
+            expect(() => writePropertyValueSafely(writer, 0x9999 as PropertyType, "anything")).toThrow();
         });
     });
 });

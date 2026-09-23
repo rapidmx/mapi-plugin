@@ -3,9 +3,8 @@
 // SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
 import { BufferReader, BufferWriter } from "../codec/BufferCursor.js";
-import { writePropertyValue } from "../codec/PropertyValue.js";
 import { resolveContentsWindow } from "./ContentsTable.js";
-import { resolvePropertyValues, ResolutionCache } from "./PropertyResolvers.js";
+import { resolvePropertyValues, ResolutionCache, writePropertyValueSafely } from "./PropertyResolvers.js";
 import type { RopContext, RopHandler } from "./RopHandler.js";
 
 const ROP_ID_QUERY_ROWS = 0x15;
@@ -37,7 +36,11 @@ const RESPONSE_HEADER_BYTES = 9;
  * `FlaggedPropertyValue` flag+optional-value). This pragmatic subset always emits `StandardPropertyRow`
  * (`Flags = 0x00`) - every configured column always resolves to *some* value here (falling back to a
  * type-appropriate zero/empty default for an unsupported property, never an error), so `FlaggedPropertyRow`'s
- * per-column error signaling is never needed.
+ * per-column error signaling is never needed. That "never an error" promise covers a client-requested
+ * `propertyType` that doesn't match what a column's own `propertyId` resolves to, not just an entirely
+ * unmodeled `propertyId` - `buildRow` writes each column through `PropertyResolvers.writePropertyValueSafely`,
+ * which falls back to the same type-appropriate default there too, so one row's mismatched column degrades
+ * instead of failing this whole call (and discarding every row already built in it).
  *
  * Backward reads (`ForwardRead = FALSE`) and the `NoAdvance` flag are decoded (to advance the reader
  * correctly) but not honored - this pragmatic subset's tables are simple forward-only cursors. Works generically
@@ -127,7 +130,7 @@ export class RopQueryRowsHandler implements RopHandler {
         const writer = new BufferWriter();
         writer.writeUInt8(0x00); // Flags - StandardPropertyRow, see class doc comment
         const values = await resolvePropertyValues(target, columns, context, cache);
-        columns.forEach((column, index) => writePropertyValue(writer, column.propertyType, values[index]));
+        columns.forEach((column, index) => writePropertyValueSafely(writer, column.propertyType, values[index]));
         return writer.toBuffer();
     }
 }

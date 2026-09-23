@@ -227,6 +227,38 @@ describe("RopDeleteMessagesHandler Tests", () => {
         expect(budget.queriesRemaining).toBe(-1); // the third charge (m2's findOne) hits 0; the attempted fourth (its delete) goes negative and throws
     });
 
+    it("Charges the audit write too when context.audit is configured, exhausting the budget a message earlier than without it.", async () => {
+        const messages: Record<string, { uid: string; mailboxUid: string; folderUid: string }> = {
+            m1: { uid: "m1", mailboxUid: "mailbox-1", folderUid: "f1" },
+            m2: { uid: "m2", mailboxUid: "mailbox-1", folderUid: "f1" },
+        };
+        const budget = new ExecuteBudget(undefined, undefined, { maxQueries: 3 });
+        const audit = vi.fn().mockResolvedValue(undefined);
+        const context = makeContext({
+            budget,
+            audit,
+            messageRepo: {
+                findOne: vi.fn().mockImplementation((uid: string) => Promise.resolve(messages[uid])),
+                delete: vi.fn().mockResolvedValue(undefined),
+            } as any,
+        });
+        context.session.handles[5] = { type: "folder", entityUid: "folder:f1" };
+        context.session.messageIds = { "1": "message:m1", "2": "message:m2" };
+
+        // m1's findOne+delete+audit-create now spend all 3 charges (not just 2, as without an audit function
+        // configured) - m2's findOne charge is what exceeds the budget this time and throws before m2's findOne
+        // even runs, one message earlier than the sibling test above with the same budget and no audit function
+        // (there, m1 only spends 2 charges, leaving room for m2's own findOne to run before its delete is refused).
+        await expect(new RopDeleteMessagesHandler().handle(new BufferReader(buildRequest({ messageIds: [1n, 2n] })), new BufferWriter(), context)).rejects.toBeInstanceOf(
+            WorkBudgetExceededError,
+        );
+
+        expect((context.messageRepo as any).findOne).toHaveBeenCalledTimes(1);
+        expect((context.messageRepo as any).delete).toHaveBeenCalledTimes(1);
+        expect(audit).toHaveBeenCalledTimes(1);
+        expect(budget.queriesRemaining).toBe(-1);
+    });
+
     it("Handles an empty MessageIds list, reporting success with PartialCompletion=false.", async () => {
         const context = makeContext();
         context.session.handles[5] = { type: "folder", entityUid: "folder:f1" };

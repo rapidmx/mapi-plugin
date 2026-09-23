@@ -8,9 +8,18 @@ import type { RopContext, RopHandler } from "./RopHandler.js";
 
 const ROP_ID_DELETE_MESSAGES = 0x1e;
 
-/** Audits a message deleted through MAPI with the same `MESSAGE_DELETE` entry the REST message route records. */
+/** Audits a message deleted through MAPI with the same `MESSAGE_DELETE` entry the REST message route records.
+ * Charged to `context.budget` like the `findOne`/`delete` calls around every call site of this function - a real
+ * DB `create()` whenever `context.audit` is configured (the case in every real deployment), so leaving it
+ * uncharged undercounted this loop's real DB work by a third. No-op (and no charge - there's no DB work to
+ * account for) when `context.audit` is absent, the same as an optional-repo item kind this pragmatic subset
+ * already skips charging for. */
 export async function auditMessageDelete(context: RopContext, message: { uid: string; mailboxUid: string; subject?: string; folderUid: string }): Promise<void> {
-    await context.audit?.({
+    if (!context.audit) {
+        return;
+    }
+    context.budget?.chargeQueries();
+    await context.audit({
         action: AuditAction.MESSAGE_DELETE,
         targetType: "Message",
         targetUid: message.uid,
