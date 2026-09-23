@@ -772,5 +772,21 @@ describe("RopSubmitMessageHandler Tests", () => {
             await expect(new RopSubmitMessageHandler().handle(new BufferReader(buildRequest({})), new BufferWriter(), context)).rejects.toBeInstanceOf(WorkBudgetExceededError);
             expect(context.mailTransport.send).not.toHaveBeenCalled();
         });
+
+        it("Charges each bare-display-name contact lookup against the Execute's query budget, stopping mid-recipient-list once it's spent.", async () => {
+            // Mirrors RopDeleteMessagesHandler's own budget-exhaustion test: a client-supplied recipient list of bare
+            // display names (no "@") each triggers a real contactRepo.find() round trip via
+            // AddressList.findContactsByDisplayName - without a budget charge per lookup, a large To/Cc/Bcc list (up
+            // to MAX_RECIPIENTS_PER_MESSAGE each, across up to MAX_SUBMITS_PER_EXECUTE submits per Execute) could run
+            // thousands of unmetered queries.
+            const contactFind = vi.fn().mockResolvedValue([]);
+            const context = makeContext({ contactRepo: { find: contactFind } as any, budget: new ExecuteBudget(undefined, undefined, { maxQueries: 1 }) });
+            context.session.handles[5] = { type: "message", entityUid: "", draftProperties: { "3588": "Name One; Name Two" } };
+
+            await expect(new RopSubmitMessageHandler().handle(new BufferReader(buildRequest({})), new BufferWriter(), context)).rejects.toBeInstanceOf(WorkBudgetExceededError);
+
+            expect(contactFind).toHaveBeenCalledTimes(1); // "Name One" spent the whole budget; "Name Two" never queried
+            expect(context.mailTransport.send).not.toHaveBeenCalled();
+        });
     });
 });

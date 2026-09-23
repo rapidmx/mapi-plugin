@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
 import addressparser from "nodemailer/lib/addressparser/index.js";
+import type { ExecuteBudget } from "./ExecuteBudget.js";
 import { literalQueryValue } from "./RestapiRules.js";
 import type { RopContext } from "./RopHandler.js";
 
@@ -98,11 +99,19 @@ const MAX_NAME_MATCHES = 2;
 export const MAX_RECIPIENTS_PER_MESSAGE = 500;
 
 /** The caller's contacts whose display name is exactly `name`. The name comes from the client, so it is matched
- * literally (`literalQueryValue`) and re-checked on the returned rows; a name the query layer rejects matches nothing. */
-async function findContactsByDisplayName(context: Pick<RopContext, "mailboxUid" | "contactRepo">, name: string): Promise<{ displayName?: string; emails?: { address: string }[] }[]> {
+ * literally (`literalQueryValue`) and re-checked on the returned rows; a name the query layer rejects matches nothing.
+ * Charged to `budget` like every other single-query lookup (`resolveContentsKind`, `RopDeleteFolderHandler`'s own
+ * per-item delete) before the real DB round trip runs - a bare display name is exactly what a client crafting a
+ * malicious draft controls, and `RopSubmitMessageHandler` calls this once per unresolved To/Cc/Bcc entry (up to
+ * `MAX_RECIPIENTS_PER_MESSAGE` each), so without this charge a large recipient list would run unmetered queries. */
+async function findContactsByDisplayName(
+    context: Pick<RopContext, "mailboxUid" | "contactRepo" | "budget">,
+    name: string,
+): Promise<{ displayName?: string; emails?: { address: string }[] }[]> {
     if (!context.contactRepo) {
         return [];
     }
+    context.budget?.chargeQueries();
     try {
         const rows: { displayName?: string; emails?: { address: string }[] }[] = await context.contactRepo.find(
             { mailboxUid: context.mailboxUid, displayName: literalQueryValue(name), limit: MAX_NAME_MATCHES } as any,
@@ -122,7 +131,7 @@ async function findContactsByDisplayName(context: Pick<RopContext, "mailboxUid" 
  */
 export async function resolveRecipientList(
     value: string | undefined,
-    context: Pick<RopContext, "mailboxUid" | "contactRepo">,
+    context: Pick<RopContext, "mailboxUid" | "contactRepo" | "budget">,
 ): Promise<RecipientResolution> {
     const resolution: RecipientResolution = { recipients: [], unresolved: [], invalid: [] };
     for (const entry of parseRecipientList(value)) {

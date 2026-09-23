@@ -700,3 +700,31 @@ five existing ones); coverage 100% statements/functions/lines, 99.34% branches (
     `decodingReader` branch, `PropertyResolvers.ts` lines 395-397, and `BaseMapiEmsmdbRoute.ts` lines 90/301/362/407/520
     - pre-existing single-line branch gaps this review didn't call out specifically; the branch floor (95%) was
     already comfortably cleared before and after this session regardless.
+
+#### Follow-up (same day) — a second bulk-mutation path missing budget accounting: `AddressList.ts`
+
+A second-round review of the commit above found one more real instance of the same species of gap it fixed:
+`src/rop/AddressList.ts`'s `findContactsByDisplayName`/`resolveRecipientList` had zero `ExecuteBudget` accounting -
+unlike `FolderTarget.ts`/`MessageTarget.ts`/`CalendarEventTarget.ts`, `budget` wasn't even part of their context
+type. `RopSubmitMessageHandler.ts` calls `resolveRecipientList` once each for To/Cc/Bcc (lines ~164-167); every
+bare-display-name entry (no `@`, entirely client-controlled via a crafted draft's `PidTagDisplayTo`/`Cc`/`Bcc`) runs
+a real `contactRepo.find()` through `findContactsByDisplayName`, gated only by the `MAX_RECIPIENTS_PER_MESSAGE = 500`
+count cap - which bounds list length, not DB work. Combined with `MAX_SUBMITS_PER_EXECUTE = 16`, one `Execute` could
+run up to 8,000 completely unmetered `contactRepo.find()` calls without ever touching `queriesRemaining`.
+
+Fixed by widening both functions' context parameter from `Pick<RopContext, "mailboxUid" | "contactRepo">` to also
+include `"budget"`, and charging `context.budget?.chargeQueries()` in `findContactsByDisplayName` immediately before
+the real `contactRepo.find()` call (after the existing `!context.contactRepo` early-return, so a mailbox with no
+contacts repo configured still charges nothing - consistent with `RopDeleteFolderHandler.itemRepos()`'s own
+optional-repo skip). No call-site changes needed: `RopSubmitMessageHandler.ts`'s three call sites already pass the
+full `RopContext`, which structurally satisfies the widened `Pick`.
+
+New test in `test/rop/RopSubmitMessageHandler.test.ts` ("Round 5: once per draft" group, beside the existing
+`MAX_RECIPIENTS_PER_MESSAGE`/submit-budget tests): a `PidTagDisplayTo` of two bare display names with a
+`maxQueries: 1` budget throws `WorkBudgetExceededError` after the first name's lookup, leaving `contactFind` called
+exactly once - the same shape as `RopDeleteMessagesHandler`'s own budget-exhaustion test from the commit above.
+
+726 tests pass (was 725); coverage 100% statements/functions/lines, 99.34% branches (unchanged - the new charge
+line is exercised by both the new test and every existing bare-display-name-resolution test). `yarn lint`,
+`npx tsc --noEmit -p .` and `yarn build` all clean. Not a version bump - `RELEASE_NOTES.md` was already back at
+`## Unreleased` from the commit above.
