@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.6] - 2026-09-24
+
+### Added
+- Added a RopDeleteMessagesHandler test proving the query budget stops the loop the same way it already stops RopDeleteFolder
+- Added a route test proving Execute answers a generic 500 instead of leaking a raw error when building a failed ROP's own response throws something other than a DecodeError
+- Added a route test exercising Execute with no auditLogClass configured
+- Added a dedicated test file for TransportSend.sendOrThrow covering its missing-result, empty-accepted, non-empty-rejected and absent-field default branches
+- Added tests for RopOpenMessageHandler's task-repo-absent branch and RopWriteStreamHandler's never-written write-stream branch
+- Added a RopSubmitMessageHandler test proving the query budget stops resolving a recipient list partway through, mirroring RopDeleteMessagesHandler's own budget-exhaustion test
+- Added tests proving a tight query budget now accounts for the audit write, not just the read/delete calls beside it, in both RopDeleteMessagesHandler and RopDeleteFolderHandler
+- Added PropertyResolvers.writePropertyValueSafely, encoding into a scratch buffer first so a partial failed write can never leak stray bytes into the real response ahead of later columns/rows
+- Added tests reproducing the PidTagSubject-requested-as-PtypGuid repro for both handlers and a direct unit-test block for writePropertyValueSafely
+
+### Changed
+- Charge RopDeleteMessagesHandler's per-message lookups and deletes against the Execute query budget, so a large client-supplied messageIdCount can't run unbounded sequential queries in one request
+- Charge AddressList's per-recipient bare-display-name contact lookup against the Execute query budget, so a large To/Cc/Bcc list across many RopSubmitMessage calls can't run unmetered DB queries
+- Charge the audit-log write inside RopDeleteMessagesHandler/RopDeleteFolderHandler's delete loops against the Execute query budget, centralized in auditMessageDelete() itself so it only charges when context.audit is actually configured
+- Fall back to a type-appropriate default value instead of failing the whole RopQueryRows/RopGetPropertiesSpecific response when a column's client-requested PropertyType doesn't match what its propertyId actually resolves to
+- Upgraded rapidrest and rapidmx deps
+
 ## [1.0.0-beta.5] - 2026-09-22
 
 ### Changed
@@ -161,7 +181,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 - Removed unused files
 
-[Unreleased]: https://github.com/RapidMX/mapi/compare/v1.0.0-beta.5...HEAD
+[Unreleased]: https://github.com/RapidMX/mapi/compare/v1.0.0-beta.6...HEAD
+[1.0.0-beta.6]: https://github.com/RapidMX/mapi/compare/v1.0.0-beta.5...v1.0.0-beta.6
 [1.0.0-beta.5]: https://github.com/RapidMX/mapi/compare/v1.0.0-beta.4...v1.0.0-beta.5
 [1.0.0-beta.4]: https://github.com/RapidMX/mapi/compare/v1.0.0-beta.3...v1.0.0-beta.4
 [1.0.0-beta.3]: https://github.com/RapidMX/mapi/compare/v1.0.0-beta.2...v1.0.0-beta.3
