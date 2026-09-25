@@ -97,6 +97,25 @@ describe("MapiTimeZone Tests", () => {
         });
     });
 
+    describe("Intl output shapes", () => {
+        afterEach(() => {
+            vi.restoreAllMocks();
+        });
+
+        it("Treats a bare 'GMT' offset string as a zero offset regardless of the runtime's own ICU data.", () => {
+            // Whether a real zero-offset zone formats as "GMT" or "GMT+0" varies across ICU/CLDR versions, so pin
+            // the bare-"GMT" shape with a stub rather than relying on the host runtime to produce it.
+            vi.spyOn(Intl, "DateTimeFormat").mockImplementation(function () {
+                return {
+                    formatToParts: () => [{ type: "timeZoneName", value: "GMT" }],
+                } as unknown as Intl.DateTimeFormat;
+            });
+
+            const encoded = encodeTimeZoneStruct("Europe/London", new Date("2026-01-15T00:00:00.000Z"));
+            expect(encoded.readInt32LE(0)).toBe(0);
+        });
+    });
+
     describe("Error handling", () => {
         it("Encodes an unrecognized zone identifier as UTC instead of throwing.", () => {
             const encoded = encodeTimeZoneStruct("Not/AZone", new Date("2026-01-15T00:00:00.000Z"));
