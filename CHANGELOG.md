@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.9] - 2026-09-25
+
+### Fixed
+- Fixed repository URL (again)
+
 ## [1.0.0-beta.8] - 2026-09-25
 
 ### Changed
@@ -196,7 +201,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 - Removed unused files
 
-[Unreleased]: https://github.com/rapidmx/mapi/compare/v1.0.0-beta.8...HEAD
+[Unreleased]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0-beta.9...HEAD
+[1.0.0-beta.9]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0-beta.8...v1.0.0-beta.9
 [1.0.0-beta.8]: https://github.com/rapidmx/mapi/compare/v1.0.0-beta.7...v1.0.0-beta.8
 [1.0.0-beta.7]: https://github.com/RapidMX/mapi/compare/v1.0.0-beta.6...v1.0.0-beta.7
 [1.0.0-beta.6]: https://github.com/RapidMX/mapi/compare/v1.0.0-beta.5...v1.0.0-beta.6
