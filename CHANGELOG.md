@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.7] - 2026-09-25
+
+### Changed
+- Bump the @rapidmx/restapi development dependency to 0.21.1 and refresh the lockfile, leaving the peer range unchanged
+- Document the bump in the release notes
+
 ## [1.0.0-beta.6] - 2026-09-24
 
 ### Added
@@ -181,7 +187,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 - Removed unused files
 
-[Unreleased]: https://github.com/RapidMX/mapi/compare/v1.0.0-beta.6...HEAD
+[Unreleased]: https://github.com/RapidMX/mapi/compare/v1.0.0-beta.7...HEAD
+[1.0.0-beta.7]: https://github.com/RapidMX/mapi/compare/v1.0.0-beta.6...v1.0.0-beta.7
 [1.0.0-beta.6]: https://github.com/RapidMX/mapi/compare/v1.0.0-beta.5...v1.0.0-beta.6
 [1.0.0-beta.5]: https://github.com/RapidMX/mapi/compare/v1.0.0-beta.4...v1.0.0-beta.5
 [1.0.0-beta.4]: https://github.com/RapidMX/mapi/compare/v1.0.0-beta.3...v1.0.0-beta.4

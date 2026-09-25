@@ -1,6 +1,6 @@
 {
     "name": "@rapidmx/mapi-plugin",
-    "version": "1.0.0-beta.6",
+    "version": "1.0.0-beta.7",
     "description": "A RapidMX plugin that provides MAPI over HTTP protocol support.",
     "repository": "https://github.com/RapidMX/mapi.git",
     "author": "RapidREST <rapidrests@gmail.com>",
