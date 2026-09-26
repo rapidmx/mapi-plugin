@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.11] - 2026-09-26
+
+### Changed
+- Use @rapidmx/restapi 0.23.0 as the development dependency
+- Note the dependency bump in the release notes
+
 ## [1.0.0-beta.10] - 2026-09-25
 
 ### Fixed
@@ -206,7 +212,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 - Removed unused files
 
-[Unreleased]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0-beta.10...HEAD
+[Unreleased]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0-beta.11...HEAD
+[1.0.0-beta.11]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0-beta.10...v1.0.0-beta.11
 [1.0.0-beta.10]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0-beta.9...v1.0.0-beta.10
 [1.0.0-beta.9]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0-beta.8...v1.0.0-beta.9
 [1.0.0-beta.8]: https://github.com/rapidmx/mapi/compare/v1.0.0-beta.7...v1.0.0-beta.8
