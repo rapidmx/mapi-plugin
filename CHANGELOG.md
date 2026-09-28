@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.16] - 2026-09-28
+
+### Added
+- Added a test to both the mongo and sql NSPI route suites mirroring the existing emsmdb X-RequestId echo case
+
+### Changed
+- Mirror BaseMapiEmsmdbRoute.dispatch()'s existing, already-tested header list exactly, reading x-clientinfo/x-requestid off the request and echoing them back per the spec's common response format
+- Widen both diagnostic dispatch-entry log lines to include requestId, since whether Outlook sends a real per-request value at all was itself an open question this fix's correctness depends on
+
+### Fixed
+- Fixed /mapi/nspi never setting the mandatory X-RequestId/X-ClientInfo response headers, verified against both the MS-OXCMAPIHTTP spec text and Gromox's own reference implementation
+
 ## [1.0.0-beta.15] - 2026-09-28
 
 ### Changed
@@ -241,7 +253,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 - Removed unused files
 
-[Unreleased]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0-beta.15...HEAD
+[Unreleased]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0-beta.16...HEAD
+[1.0.0-beta.16]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0-beta.15...v1.0.0-beta.16
 [1.0.0-beta.15]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0-beta.14...v1.0.0-beta.15
 [1.0.0-beta.14]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0-beta.13...v1.0.0-beta.14
 [1.0.0-beta.13]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0-beta.12...v1.0.0-beta.13

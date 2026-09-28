@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v1.0.0-beta.16
+
 ### Fixed
 
 - **`/mapi/nspi` (`Bind`/`Unbind`/`GetMatches`) now returns the mandatory `X-RequestId`/`X-ClientInfo` response headers.** `[MS-OXCMAPIHTTP]`'s common response format requires every response, of every request type, to echo back the caller's own `X-RequestId` unchanged - this route never set it at all, verified against both the spec text and Gromox's own reference implementation (which builds every MAPI/HTTP response, `Bind` included, from one shared header-setting function for exactly this reason). `/mapi/emsmdb` already did this correctly; this brings `/mapi/nspi` in line with it.
