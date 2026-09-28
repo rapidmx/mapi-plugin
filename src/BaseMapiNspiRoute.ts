@@ -7,7 +7,7 @@ import { ApiErrorMessages, ApiErrors, HttpRequest, HttpResponse, ObjectFactory, 
 import { handleNspiBind, handleNspiUnbind } from "./nspi/NspiBindHandler.js";
 import { handleNspiGetMatches } from "./nspi/NspiGetMatchesHandler.js";
 import { Mailbox, resolveCallerMailboxUid } from "@rapidmx/restapi";
-const { Init } = ObjectDecorators;
+const { Init, Logger } = ObjectDecorators;
 const { Auth, Post, Request, Response, User: AuthUser } = RouteDecorators;
 
 function firstHeader(req: HttpRequest, name: string): string | undefined {
@@ -51,6 +51,11 @@ export abstract class BaseMapiNspiRoute<M extends Mailbox> {
     private mailboxRepo?: RepoUtils<M>;
     private contactRepo?: RepoUtils<any>;
 
+    // TEMPORARY DIAGNOSTIC LOGGING - see NOTES.md's 2026-09-28 "diagnostic release" entry. Remove once the
+    // Outlook desktop "set of folders cannot be opened" root cause is confirmed.
+    @Logger
+    private logger: any;
+
     @Init
     public async init(): Promise<void> {
         this.mailboxRepo = await this._objectFactory!.newInstance(RepoUtils, {
@@ -79,24 +84,36 @@ export abstract class BaseMapiNspiRoute<M extends Mailbox> {
             .setHeader("X-ResponseCode", "0")
             .setHeader("X-ServerApplication", "RapidREST-Mail");
 
-        switch (requestType) {
-            case "Bind":
-                await handleNspiBind(res, user, this.mailboxRepo);
-                return;
-            case "Unbind":
-                handleNspiUnbind(res);
-                return;
-            case "GetMatches": {
-                const mailboxUid = await resolveCallerMailboxUid(this.mailboxRepo, user);
-                if (!mailboxUid) {
-                    throw new ApiError(ApiErrors.NOT_FOUND, 404, ApiErrorMessages.NOT_FOUND);
+        // TEMPORARY DIAGNOSTIC LOGGING - see the matching comment above.
+        this.logger?.warn(`MAPI_DEBUG NSPI dispatch requestType=${requestType} user=${user.uid}`);
+        try {
+            switch (requestType) {
+                case "Bind":
+                    await handleNspiBind(res, user, this.mailboxRepo);
+                    this.logger?.warn(`MAPI_DEBUG NSPI Bind OK user=${user.uid}`);
+                    return;
+                case "Unbind":
+                    handleNspiUnbind(res);
+                    return;
+                case "GetMatches": {
+                    const mailboxUid = await resolveCallerMailboxUid(this.mailboxRepo, user);
+                    if (!mailboxUid) {
+                        throw new ApiError(ApiErrors.NOT_FOUND, 404, ApiErrorMessages.NOT_FOUND);
+                    }
+                    await handleNspiGetMatches(req, res, mailboxUid, this.contactRepo);
+                    this.logger?.warn(`MAPI_DEBUG NSPI GetMatches OK mailboxUid=${mailboxUid}`);
+                    return;
                 }
-                await handleNspiGetMatches(req, res, mailboxUid, this.contactRepo);
-                return;
+                default:
+                    this.logger?.warn(`MAPI_DEBUG NSPI unrecognized requestType=${requestType}, answering 501`);
+                    res.status(501).send();
+                    return;
             }
-            default:
-                res.status(501).send();
-                return;
+        } catch (err) {
+            // TEMPORARY DIAGNOSTIC LOGGING - the real error here would otherwise only ever surface as a generic
+            // 500/ApiError with no server-side trace of why.
+            this.logger?.warn(`MAPI_DEBUG NSPI ${requestType} threw:`, err);
+            throw err;
         }
     }
 }
