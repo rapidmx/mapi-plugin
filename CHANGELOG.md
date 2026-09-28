@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.15] - 2026-09-28
+
+### Changed
+- Extend the temporary MAPI_DEBUG diagnostic logging to the raw wire bytes of Connect and Bind, since beta.14's capture showed both succeeding on every attempt with nothing else ever called, ruling out a missing NSPI operation as the cause
+- Log Connect's incoming and outgoing body hex plus the Set-Cookie values sent, in BaseMapiEmsmdbRoute
+- Log every NSPI request type's incoming and outgoing body hex via a temporary res.send() wrapper in BaseMapiNspiRoute, covering Bind today without touching NspiBindHandler's own signature
+
 ## [1.0.0-beta.14] - 2026-09-28
 
 ### Changed
@@ -234,7 +241,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 - Removed unused files
 
-[Unreleased]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0-beta.14...HEAD
+[Unreleased]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0-beta.15...HEAD
+[1.0.0-beta.15]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0-beta.14...v1.0.0-beta.15
 [1.0.0-beta.14]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0-beta.13...v1.0.0-beta.14
 [1.0.0-beta.13]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0-beta.12...v1.0.0-beta.13
 [1.0.0-beta.12]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0-beta.11...v1.0.0-beta.12

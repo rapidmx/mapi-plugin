@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v1.0.0-beta.15
+
 ### Added
 
 - **Extend the temporary `MAPI_DEBUG` diagnostic logging to the raw wire bytes of `Connect` and `Bind`.** beta.14's capture showed both operations succeeding cleanly on every attempt, on a repeating cycle, with `Execute`/`GetMatches`/anything else never once being called - so the next thing to check is whether the response bytes themselves are actually spec-correct, not just "our own code thinks it succeeded." Logs `Connect`'s incoming/outgoing body hex (plus the `Set-Cookie` values sent) and every NSPI request type's incoming/outgoing body hex (via a temporary `res.send()` wrapper, so it covers `Bind` today and any other NSPI operation for free).
