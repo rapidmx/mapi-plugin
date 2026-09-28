@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.17] - 2026-09-28
+
+### Changed
+- Decorate the MapiContext, MapiSequence and NspiContext session cookies with Path, Secure, SameSite=None and HttpOnly instead of sending them as bare name=value pairs
+- Found by capturing the same Outlook client's traffic against a working Exchange Online mailbox in the same Fiddler session as this deployment's broken one, since three separate full-session captures already proved Outlook never sends a Cookie header back to us at all
+- Match Exchange Online's own Set-Cookie shape exactly, read directly off its real response headers rather than inferred from spec text alone, keeping this library's own cookie names since the spec leaves those implementation-specific
+
 ## [1.0.0-beta.16] - 2026-09-28
 
 ### Added
@@ -253,7 +260,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 - Removed unused files
 
-[Unreleased]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0-beta.16...HEAD
+[Unreleased]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0-beta.17...HEAD
+[1.0.0-beta.17]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0-beta.16...v1.0.0-beta.17
 [1.0.0-beta.16]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0-beta.15...v1.0.0-beta.16
 [1.0.0-beta.15]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0-beta.14...v1.0.0-beta.15
 [1.0.0-beta.14]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0-beta.13...v1.0.0-beta.14

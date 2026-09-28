@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v1.0.0-beta.17
+
 ### Fixed
 
 - **Session cookies (`MapiContext`/`MapiSequence` on `/mapi/emsmdb`, `NspiContext` on `/mapi/nspi`) now carry `Path`/`Secure`/`SameSite=None`/`HttpOnly`, instead of being bare `name=value` pairs.** Real Outlook desktop never sent a `Cookie` header back to this deployment on any request, across every capture taken during this investigation - confirmed directly by comparing a live Fiddler capture of the same Outlook client's traffic against a working Exchange Online mailbox in the same session: Exchange Online's `Set-Cookie` headers are fully decorated this way, and Outlook reliably echoes them back (hundreds of real `Execute` calls observed); this deployment's bare cookies were never once echoed back in three separate full-session captures. This is very likely the actual cause of Outlook desktop never completing a mailbox logon against this deployment.
