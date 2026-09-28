@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v1.0.0-beta.14
+
 ### Added
 
 - **Extend the temporary `MAPI_DEBUG` diagnostic logging to `/mapi/nspi`** (`BaseMapiNspiRoute`): the beta.13 capture showed Outlook desktop repeatedly `Connect`ing to the mailbox store but never once calling `Execute` - the Address Book (NSPI) provider, previously unlogged entirely, is the likely place the client is actually getting stuck. Logs dispatch entry, `Bind`/`GetMatches` success, and the real error on any throw.

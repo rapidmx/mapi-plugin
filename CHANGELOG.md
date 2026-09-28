@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.14] - 2026-09-28
+
+### Changed
+- Extend the temporary MAPI_DEBUG diagnostic logging to BaseMapiNspiRoute, since beta.13's capture showed Outlook desktop repeatedly connecting to the mailbox store but never once calling Execute
+- Log dispatch entry, Bind and GetMatches success, and the real error on any throw, matching the observability gap already closed in RopDispatcher for emsmdb
+- Confirm the /mapi/nspi route is actually reachable (401 on an unauthenticated probe) before assuming it needs instrumenting at all
+
 ## [1.0.0-beta.13] - 2026-09-28
 
 ### Added
@@ -227,7 +234,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 - Removed unused files
 
-[Unreleased]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0-beta.13...HEAD
+[Unreleased]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0-beta.14...HEAD
+[1.0.0-beta.14]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0-beta.13...v1.0.0-beta.14
 [1.0.0-beta.13]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0-beta.12...v1.0.0-beta.13
 [1.0.0-beta.12]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0-beta.11...v1.0.0-beta.12
 [1.0.0-beta.11]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0-beta.10...v1.0.0-beta.11
