@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- **`/mapi/emsmdb` and `/mapi/nspi` no longer send the framework's own CSRF cookie.** beta.17's cookie-attribute fix wasn't enough on its own - a follow-up capture showed real Outlook desktop still never sending a `Cookie` header back, even with attributes now matching Exchange Online exactly. The one remaining difference: every response from this deployment also carried an unrelated `csrf=...` cookie, issued unconditionally by the framework's CSRF middleware (which only ever matters for cookie-based browser auth, never this route's Bearer/Basic auth) and mixed in alongside the real session cookies - something a real Exchange Online response never has. Cleared before this route's own cookies are set, entirely within this plugin (no framework or server change needed).
+
 ## v1.0.0-beta.17
 
 ### Fixed

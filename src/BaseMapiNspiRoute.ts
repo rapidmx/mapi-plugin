@@ -95,6 +95,9 @@ export abstract class BaseMapiNspiRoute<M extends Mailbox> {
             .setHeader("X-ResponseCode", "0")
             .setHeader("X-ClientInfo", clientInfo)
             .setHeader("X-ServerApplication", "RapidREST-Mail");
+        // Strip the framework's own CSRF cookie before this route's own Set-Cookie (Bind's NspiContext) gets
+        // appended - see the matching comment in BaseMapiEmsmdbRoute.dispatch() for the full reasoning.
+        res.setHeader("Set-Cookie", []);
 
         // TEMPORARY DIAGNOSTIC LOGGING - see the matching comment above. Wraps res.send() to log the exact
         // outgoing bytes regardless of which case below builds them, and logs the raw incoming body too (the

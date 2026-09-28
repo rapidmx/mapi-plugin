@@ -255,6 +255,16 @@ export abstract class BaseMapiEmsmdbRoute<M extends Mailbox> {
             .setHeader("X-ResponseCode", "0")
             .setHeader("X-ClientInfo", clientInfo)
             .setHeader("X-ServerApplication", "RapidREST-Mail");
+        // The framework's own CSRF middleware (RouteUtils.checkCsrf(), wired into every route automatically)
+        // already ran ahead of this handler and unconditionally appended a `csrf=...` Set-Cookie - meaningless
+        // here (CSRF protection only ever applies to req.auth.source === "cookie", never this route's
+        // Bearer/Basic auth) but real, on the wire, mixed in with the session cookies below. Clearing it
+        // first (setHeader *replaces*, unlike appendHeader) so only MAPI's own cookies go out: a live capture
+        // comparing this deployment against a real Exchange Online session in the same Outlook client, same
+        // session, showed Exchange Online's Set-Cookie set contains only MAPI-relevant cookies - see NOTES.md's
+        // dated entry for the fuller trail (this was the next difference checked after matching cookie
+        // attributes alone turned out not to be enough).
+        res.setHeader("Set-Cookie", []);
 
         switch (requestType) {
             case "Connect":

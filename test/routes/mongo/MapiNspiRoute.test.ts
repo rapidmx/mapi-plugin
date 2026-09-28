@@ -204,6 +204,13 @@ describe("Route:MapiNspiRouteMongo Tests", () => {
             expect(reader.hasMore()).toBe(false);
         });
 
+        it("Never sends the framework's own CSRF cookie, only NspiContext.", async () => {
+            await createMailbox(owner.uid);
+            const result = await bind();
+            expect(result.status).toBe(200);
+            expect(String(result.headers["set-cookie"])).not.toContain("csrf=");
+        });
+
         it("Echoes the caller's own X-RequestId back on the response, per [MS-OXCMAPIHTTP]'s common response format.", async () => {
             await createMailbox(owner.uid);
             const result = await bind({ "X-RequestId": "{11111111-2222-3333-4444-555555555555}:1" });

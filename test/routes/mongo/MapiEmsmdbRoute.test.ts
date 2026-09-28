@@ -228,6 +228,14 @@ describe("Route:MapiEmsmdbRouteMongo Tests", () => {
             expect(cookie).toContain("MapiSequence=");
         });
 
+        it("Never sends the framework's own CSRF cookie, only MAPI's own session cookies - a real Outlook capture never sent Cookie back at all until this was removed.", async () => {
+            await createMailbox(owner.uid);
+            const result = await connect();
+            expect(result.status).toBe(200);
+            const cookie = cookieHeaderFrom(result.headers["set-cookie"]);
+            expect(cookie).not.toContain("csrf=");
+        });
+
         it("Returns a well-formed success response body (StatusCode/ErrorCode both zero) with the DisplayName echoed.", async () => {
             await createMailbox(owner.uid, { displayName: "Ada Lovelace" });
             const result = await connect();
