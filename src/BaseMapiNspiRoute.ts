@@ -79,16 +79,28 @@ export abstract class BaseMapiNspiRoute<M extends Mailbox> {
         }
 
         const requestType: string | undefined = firstHeader(req, "x-requesttype");
+        // [MS-OXCMAPIHTTP] 2.2.3.3.2/"Common Response Format": every response (success or failure, every
+        // request type, this endpoint included) MUST carry X-RequestId back with the exact value the client
+        // sent on the request - the server-assigned session-affinity GUID:counter the client uses to detect a
+        // response for the wrong request. This route never echoed it at all - confirmed against both the spec
+        // text and Gromox's own `commonHeader()` (github.com/grommunio/gromox, exch/mh/mh_common.cpp), which
+        // sets X-RequestId/X-ClientInfo unconditionally from one shared function for exactly this reason - a
+        // per-route header list, like this one used to be, is exactly how an endpoint can silently miss it.
+        // Mirrors BaseMapiEmsmdbRoute.dispatch()'s own identical header set.
+        const clientInfo: string = firstHeader(req, "x-clientinfo") ?? "";
+        const requestId: string = firstHeader(req, "x-requestid") ?? "";
         res.setHeader("Content-Type", "application/mapi-http")
             .setHeader("X-RequestType", requestType ?? "")
+            .setHeader("X-RequestId", requestId)
             .setHeader("X-ResponseCode", "0")
+            .setHeader("X-ClientInfo", clientInfo)
             .setHeader("X-ServerApplication", "RapidREST-Mail");
 
         // TEMPORARY DIAGNOSTIC LOGGING - see the matching comment above. Wraps res.send() to log the exact
         // outgoing bytes regardless of which case below builds them, and logs the raw incoming body too (the
         // request body is otherwise never decoded/logged at all for Bind).
         this.logger?.warn(
-            `MAPI_DEBUG NSPI dispatch requestType=${requestType} user=${user.uid} rawBodyHex=${req.rawBody ? req.rawBody.toString("hex") : "<empty>"}`,
+            `MAPI_DEBUG NSPI dispatch requestType=${requestType} user=${user.uid} clientInfo=${clientInfo} requestId=${requestId} rawBodyHex=${req.rawBody ? req.rawBody.toString("hex") : "<empty>"}`,
         );
         const originalSend = res.send.bind(res);
         res.send = (body?: any): any => {

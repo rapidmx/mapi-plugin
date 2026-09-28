@@ -246,7 +246,7 @@ export abstract class BaseMapiEmsmdbRoute<M extends Mailbox> {
         // TEMPORARY DIAGNOSTIC LOGGING - see NOTES.md's 2026-09-28 "diagnostic release" entry. Remove once the
         // Outlook desktop "set of folders cannot be opened" root cause is confirmed.
         this.logger?.warn(
-            `MAPI_DEBUG dispatch requestType=${requestType} user=${user.uid} sessionCookie=${req.cookies["MapiContext"] ?? "<none>"} clientInfo=${clientInfo}`,
+            `MAPI_DEBUG dispatch requestType=${requestType} user=${user.uid} sessionCookie=${req.cookies["MapiContext"] ?? "<none>"} clientInfo=${clientInfo} requestId=${requestId}`,
         );
 
         res.setHeader("Content-Type", "application/mapi-http")

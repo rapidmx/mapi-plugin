@@ -184,6 +184,13 @@ describe("Route:MapiNspiRouteSQL Tests", () => {
             expect(reader.readUInt32LE()).toBe(0); // AuxiliaryBufferSize
             expect(reader.hasMore()).toBe(false);
         });
+
+        it("Echoes the caller's own X-RequestId back on the response, per [MS-OXCMAPIHTTP]'s common response format.", async () => {
+            await createMailbox(owner.uid);
+            const result = await bind({ "X-RequestId": "{11111111-2222-3333-4444-555555555555}:1" });
+            expect(result.status).toBe(200);
+            expect(result.headers["x-requestid"]).toBe("{11111111-2222-3333-4444-555555555555}:1");
+        });
     });
 
     describe("Unbind", () => {
