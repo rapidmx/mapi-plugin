@@ -243,6 +243,12 @@ export abstract class BaseMapiEmsmdbRoute<M extends Mailbox> {
         const clientInfo: string = firstHeader(req, "x-clientinfo") ?? "";
         const requestId: string = firstHeader(req, "x-requestid") ?? "";
 
+        // TEMPORARY DIAGNOSTIC LOGGING - see NOTES.md's 2026-09-28 "diagnostic release" entry. Remove once the
+        // Outlook desktop "set of folders cannot be opened" root cause is confirmed.
+        this.logger?.warn(
+            `MAPI_DEBUG dispatch requestType=${requestType} user=${user.uid} sessionCookie=${req.cookies["MapiContext"] ?? "<none>"} clientInfo=${clientInfo}`,
+        );
+
         res.setHeader("Content-Type", "application/mapi-http")
             .setHeader("X-RequestType", requestType ?? "")
             .setHeader("X-RequestId", requestId)
@@ -286,6 +292,8 @@ export abstract class BaseMapiEmsmdbRoute<M extends Mailbox> {
         const mailbox: M | undefined = await this.mailboxRepo!.findOne(mailboxUid, { ignoreACL: true });
 
         const session: MapiSessionContext = await this.sessionManager!.create(mailboxUid, user.uid);
+        // TEMPORARY DIAGNOSTIC LOGGING - see the matching comment in dispatch().
+        this.logger?.warn(`MAPI_DEBUG Connect OK mailboxUid=${mailboxUid} sessionUid=${session.uid}`);
         res.appendHeader("Set-Cookie", `MapiContext=${session.uid}`);
         res.appendHeader("Set-Cookie", `MapiSequence=0`);
 
@@ -405,6 +413,8 @@ export abstract class BaseMapiEmsmdbRoute<M extends Mailbox> {
         await this.sessionManager!.touch(session).catch(() => undefined);
 
         const { ropsList, handleTable, maxRopOut } = decodeExecuteRequest(req.rawBody ?? Buffer.alloc(0));
+        // TEMPORARY DIAGNOSTIC LOGGING - see the matching comment in dispatch().
+        this.logger?.warn(`MAPI_DEBUG Execute IN ropsListHex=${ropsList.toString("hex")} maxRopOut=${maxRopOut} handleTableLen=${handleTable.length}`);
         const context: RopContext = {
             mailboxUid: session.mailboxUid,
             userUid: session.userUid,
@@ -447,6 +457,10 @@ export abstract class BaseMapiEmsmdbRoute<M extends Mailbox> {
             await Promise.all(released.map((key) => store.delete(key, owners).catch(() => undefined)));
         }
         if (!Buffer.isBuffer(dispatched) && !(dispatched.error instanceof ExecuteBufferTooSmallError)) {
+            // TEMPORARY DIAGNOSTIC LOGGING - see the matching comment in dispatch(). dispatchRops() only rejects
+            // like this for something it can't attribute to one ROP (a malformed request, or a context-setup
+            // throw) - otherwise-silent past this point (400 or a generic 500).
+            this.logger?.warn(`MAPI_DEBUG dispatchRops rejected:`, dispatched.error);
             throw dispatched.error instanceof DecodeError ? new ApiError(ApiErrors.INVALID_REQUEST, 400, ApiErrorMessages.INVALID_REQUEST) : dispatched.error;
         }
         if (saved !== "saved") {
@@ -468,6 +482,8 @@ export abstract class BaseMapiEmsmdbRoute<M extends Mailbox> {
             return;
         }
         const responseRopsList: Buffer = dispatched;
+        // TEMPORARY DIAGNOSTIC LOGGING - see the matching comment in dispatch().
+        this.logger?.warn(`MAPI_DEBUG Execute OUT responseRopsListHex=${responseRopsList.toString("hex")}`);
 
         const responseRopBuffer: Buffer = encodeRopBuffer({ ropsList: responseRopsList, handleTable });
         const body = new BufferWriter();
@@ -500,6 +516,8 @@ export abstract class BaseMapiEmsmdbRoute<M extends Mailbox> {
 
     /** Writes an `Execute` failure body (no ROP buffer) with the given `X-ResponseCode` and `ErrorCode`. */
     private sendExecuteFailure(res: HttpResponse, responseCode: number, errorCode: number): void {
+        // TEMPORARY DIAGNOSTIC LOGGING - see the matching comment in dispatch().
+        this.logger?.warn(`MAPI_DEBUG sendExecuteFailure responseCode=${responseCode} errorCode=0x${errorCode.toString(16)}`);
         res.setHeader("X-ResponseCode", String(responseCode));
         const body = new BufferWriter();
         body.writeUInt32LE(0); // StatusCode

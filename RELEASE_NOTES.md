@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- **Temporary diagnostic logging** for the Outlook desktop "set of folders cannot be opened" investigation. `BaseMapiEmsmdbRoute` now logs (`warn` level, tag `MAPI_DEBUG`) each request's type, `Connect` success, `Execute`'s incoming/outgoing `RopsList` hex and every `Execute`-level failure path (session not found, invalid sequence, buffer too small); `RopDispatcher` now logs (`console.error`, tag `MAPI_DEBUG`) the real error whenever an individual ROP handler throws - previously swallowed entirely into a bare `MAPI_E_CALL_FAILED`/`MAPI_E_TOO_COMPLEX` with no server-side trace of why. Not a behavior change - purely observational - and expected to be removed again once the real root cause is confirmed from what this reveals.
+
 ## v1.0.0-beta.12
 
 ## v1.0.0-beta.11
