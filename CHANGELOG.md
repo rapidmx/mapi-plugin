@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-beta.18] - 2026-09-28
+
+### Added
+- Added tests asserting a real Connect/Bind response never contains the csrf cookie
+
+### Changed
+- Strip the framework's own CSRF cookie from /mapi/emsmdb and /mapi/nspi responses, since beta.17's cookie-attribute fix alone still left Outlook never sending a Cookie header back at all
+- Found by comparing full response headers against a real Exchange Online session again: every response here also carried an unrelated csrf cookie ahead of the real session cookies, issued unconditionally by RouteUtils.checkCsrf() regardless of this route's own Bearer/Basic auth, which a real Exchange Online response never has
+- Clear it with setHeader("Set-Cookie", []) right after the other common headers, before the route delegates to a handler, since setHeader replaces the whole header unlike the appendHeader both the CSRF middleware and this library's own cookie code use
+
 ## [1.0.0-beta.17] - 2026-09-28
 
 ### Changed
@@ -260,7 +270,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 - Removed unused files
 
-[Unreleased]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0-beta.17...HEAD
+[Unreleased]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0-beta.18...HEAD
+[1.0.0-beta.18]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0-beta.17...v1.0.0-beta.18
 [1.0.0-beta.17]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0-beta.16...v1.0.0-beta.17
 [1.0.0-beta.16]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0-beta.15...v1.0.0-beta.16
 [1.0.0-beta.15]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0-beta.14...v1.0.0-beta.15
