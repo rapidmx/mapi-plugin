@@ -84,8 +84,17 @@ export abstract class BaseMapiNspiRoute<M extends Mailbox> {
             .setHeader("X-ResponseCode", "0")
             .setHeader("X-ServerApplication", "RapidREST-Mail");
 
-        // TEMPORARY DIAGNOSTIC LOGGING - see the matching comment above.
-        this.logger?.warn(`MAPI_DEBUG NSPI dispatch requestType=${requestType} user=${user.uid}`);
+        // TEMPORARY DIAGNOSTIC LOGGING - see the matching comment above. Wraps res.send() to log the exact
+        // outgoing bytes regardless of which case below builds them, and logs the raw incoming body too (the
+        // request body is otherwise never decoded/logged at all for Bind).
+        this.logger?.warn(
+            `MAPI_DEBUG NSPI dispatch requestType=${requestType} user=${user.uid} rawBodyHex=${req.rawBody ? req.rawBody.toString("hex") : "<empty>"}`,
+        );
+        const originalSend = res.send.bind(res);
+        res.send = (body?: any): any => {
+            this.logger?.warn(`MAPI_DEBUG NSPI ${requestType} OUT responseHex=${Buffer.isBuffer(body) ? body.toString("hex") : String(body)}`);
+            return originalSend(body);
+        };
         try {
             switch (requestType) {
                 case "Bind":

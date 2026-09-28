@@ -285,6 +285,11 @@ export abstract class BaseMapiEmsmdbRoute<M extends Mailbox> {
      * request body is never decoded at all here.
      */
     private async handleConnect(req: HttpRequest, res: HttpResponse, user: JWTUser): Promise<void> {
+        // TEMPORARY DIAGNOSTIC LOGGING - see the matching comment in dispatch(). The request body is never
+        // decoded (see this method's own doc comment on why), but real Outlook sends a real UserDn/Flags/
+        // CodePageId/CpidString/LcidString/LcidSort/AuxiliaryBuffer here - worth seeing the raw bytes in case
+        // something in it should actually change how this responds.
+        this.logger?.warn(`MAPI_DEBUG Connect IN rawBodyHex=${req.rawBody ? req.rawBody.toString("hex") : "<empty>"}`);
         const mailboxUid: string | undefined = await resolveCallerMailboxUid(this.mailboxRepo!, user);
         if (!mailboxUid) {
             throw new ApiError(ApiErrors.NOT_FOUND, 404, ApiErrorMessages.NOT_FOUND);
@@ -308,7 +313,12 @@ export abstract class BaseMapiEmsmdbRoute<M extends Mailbox> {
         body.writeNullTerminatedString8("/");
         body.writeNullTerminatedUtf16LE(mailbox?.displayName ?? "");
         body.writeUInt32LE(0); // AuxiliaryBufferSize
-        res.status(200).send(body.toBuffer());
+        const connectResponseBody: Buffer = body.toBuffer();
+        // TEMPORARY DIAGNOSTIC LOGGING - see the matching comment in dispatch().
+        this.logger?.warn(
+            `MAPI_DEBUG Connect OUT responseHex=${connectResponseBody.toString("hex")} setCookieHeaders=MapiContext=${session.uid},MapiSequence=0`,
+        );
+        res.status(200).send(connectResponseBody);
     }
 
     /**
