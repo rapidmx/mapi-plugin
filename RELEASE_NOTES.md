@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v1.0.0
+
 ## v1.0.0-beta.18
 
 ### Fixed
