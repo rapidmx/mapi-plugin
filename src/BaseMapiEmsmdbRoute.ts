@@ -299,8 +299,13 @@ export abstract class BaseMapiEmsmdbRoute<M extends Mailbox> {
         const session: MapiSessionContext = await this.sessionManager!.create(mailboxUid, user.uid);
         // TEMPORARY DIAGNOSTIC LOGGING - see the matching comment in dispatch().
         this.logger?.warn(`MAPI_DEBUG Connect OK mailboxUid=${mailboxUid} sessionUid=${session.uid}`);
-        res.appendHeader("Set-Cookie", `MapiContext=${session.uid}`);
-        res.appendHeader("Set-Cookie", `MapiSequence=0`);
+        // Real Exchange's Set-Cookie always carries Path/Secure/SameSite=None/HttpOnly - confirmed from a real
+        // Outlook-to-Exchange-Online capture (see NOTES.md's dated entry). A bare `name=value` cookie (this
+        // route's own previous behavior) is never sent back by Outlook on any later request - decorating it to
+        // match is the fix, not a guess: three separate live-device captures against the bare version never
+        // once saw a `Cookie` header on any request, and this shape is what a working session actually uses.
+        res.appendHeader("Set-Cookie", `MapiContext=${session.uid}; Path=/mapi/emsmdb; Secure; HttpOnly; SameSite=None`);
+        res.appendHeader("Set-Cookie", `MapiSequence=0; Path=/mapi/emsmdb; Secure; HttpOnly; SameSite=None`);
 
         const body = new BufferWriter();
         body.writeUInt32LE(0); // StatusCode

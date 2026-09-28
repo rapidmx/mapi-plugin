@@ -39,7 +39,10 @@ export async function handleNspiBind(res: HttpResponse, user: JWTUser, mailboxRe
         return;
     }
 
-    res.appendHeader("Set-Cookie", `NspiContext=${crypto.randomUUID()}`); // opaque, unvalidated - see class doc comment
+    // Path/Secure/SameSite=None/HttpOnly mirror BaseMapiEmsmdbRoute.handleConnect()'s identical fix - see its
+    // own comment for why (a bare cookie is never sent back by Outlook; this decorated shape is what a real
+    // Exchange Online capture showed actually working).
+    res.appendHeader("Set-Cookie", `NspiContext=${crypto.randomUUID()}; Path=/mapi/nspi; Secure; HttpOnly; SameSite=None`); // opaque, unvalidated - see class doc comment
 
     const body = new BufferWriter();
     body.writeUInt32LE(0); // StatusCode - success
