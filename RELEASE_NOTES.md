@@ -4,6 +4,18 @@
 
 ## v1.0.0
 
+Published by mistake as a release-tooling error (`release patch` on a `1.0.0-beta.18` prerelease drops the
+prerelease tag rather than advancing it - see `.claude/NOTES.md`'s 2026-09-28 entry). The code is identical to
+`1.0.0-beta.18` plus the `@rapidmx/restapi` dependency bump below; it does **not** signal that this package has
+reached release stability - the Outlook/MAPI-HTTP connectivity investigation referenced throughout this file's
+earlier betas is still open. Once published, npm does not allow deleting a version, so this repository's
+versioning continues forward from `1.0.0` with ordinary `patch`/`minor`/`major` releases rather than resuming a
+beta prerelease line.
+
+### Changed
+
+- Bump the `@rapidmx/restapi` development dependency to `^0.25.1`, now that it's published.
+
 ## v1.0.0-beta.18
 
 ### Fixed
