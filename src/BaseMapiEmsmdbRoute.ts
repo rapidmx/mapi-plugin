@@ -171,43 +171,62 @@ export abstract class BaseMapiEmsmdbRoute<M extends Mailbox> {
     @Logger
     private logger: any;
 
+    /**
+     * Builds every model repository, the audit service, the session manager and the ROP handlers once, here, rather
+     * than lazily in the handlers. Each one is skipped when already set; the optional audit log is skipped when its
+     * model class is unset.
+     */
     @Init
-    public async init(): Promise<void> {
+    protected async initialize(): Promise<void> {
         if (!this._objectFactory) {
             throw new Error("objectFactory is not set.");
         }
-        this.mailboxRepo = await this._objectFactory.newInstance(RepoUtils, {
-            name: this.mailboxClass.name,
-            args: [this.mailboxClass],
-        });
-        this.folderRepo = await this._objectFactory.newInstance(RecoverableRepoUtils, {
-            name: this.folderClass.name,
-            args: [this.folderClass],
-        });
-        this.messageRepo = await this._objectFactory.newInstance(RecoverableRepoUtils, {
-            name: this.messageClass.name,
-            args: [this.messageClass],
-        });
-        this.calendarEventRepo = await this._objectFactory.newInstance(RecoverableRepoUtils, {
-            name: this.calendarEventClass.name,
-            args: [this.calendarEventClass],
-        });
-        this.contactRepo = await this._objectFactory.newInstance(RecoverableRepoUtils, {
-            name: this.contactClass.name,
-            args: [this.contactClass],
-        });
-        this.taskRepo = await this._objectFactory.newInstance(RecoverableRepoUtils, {
-            name: this.taskClass.name,
-            args: [this.taskClass],
-        });
+        if (!this.mailboxRepo && this.mailboxClass) {
+            this.mailboxRepo = await this._objectFactory.newInstance(RepoUtils, {
+                name: this.mailboxClass.name,
+                args: [this.mailboxClass],
+            });
+        }
+        if (!this.folderRepo && this.folderClass) {
+            this.folderRepo = await this._objectFactory.newInstance(RecoverableRepoUtils, {
+                name: this.folderClass.name,
+                args: [this.folderClass],
+            });
+        }
+        if (!this.messageRepo && this.messageClass) {
+            this.messageRepo = await this._objectFactory.newInstance(RecoverableRepoUtils, {
+                name: this.messageClass.name,
+                args: [this.messageClass],
+            });
+        }
+        if (!this.calendarEventRepo && this.calendarEventClass) {
+            this.calendarEventRepo = await this._objectFactory.newInstance(RecoverableRepoUtils, {
+                name: this.calendarEventClass.name,
+                args: [this.calendarEventClass],
+            });
+        }
+        if (!this.contactRepo && this.contactClass) {
+            this.contactRepo = await this._objectFactory.newInstance(RecoverableRepoUtils, {
+                name: this.contactClass.name,
+                args: [this.contactClass],
+            });
+        }
+        if (!this.taskRepo && this.taskClass) {
+            this.taskRepo = await this._objectFactory.newInstance(RecoverableRepoUtils, {
+                name: this.taskClass.name,
+                args: [this.taskClass],
+            });
+        }
         // Label extends plain BaseEntity, not RecoverableBaseEntity (see restapi's own model doc comment) - no
         // soft-delete support to preserve, so a plain RepoUtils is correct here, matching mailboxRepo's own
         // choice for the identical reason.
-        this.labelRepo = await this._objectFactory.newInstance(RepoUtils, {
-            name: this.labelClass.name,
-            args: [this.labelClass],
-        });
-        if (this.auditLogClass) {
+        if (!this.labelRepo && this.labelClass) {
+            this.labelRepo = await this._objectFactory.newInstance(RepoUtils, {
+                name: this.labelClass.name,
+                args: [this.labelClass],
+            });
+        }
+        if (!this.auditLogUtils && this.auditLogClass) {
             const auditLogRepo = await this._objectFactory.newInstance(RepoUtils, {
                 name: this.auditLogClass.name,
                 args: [this.auditLogClass],
@@ -217,10 +236,14 @@ export abstract class BaseMapiEmsmdbRoute<M extends Mailbox> {
                 args: [auditLogRepo],
             });
         }
-        this.sessionManager = await this._objectFactory.newInstance(MapiSessionManager);
-        for (const HandlerClass of this.ropHandlerClasses) {
-            const handler: RopHandler = await this._objectFactory.newInstance(HandlerClass);
-            this.ropHandlers.set(handler.ropId, handler);
+        if (!this.sessionManager) {
+            this.sessionManager = await this._objectFactory.newInstance(MapiSessionManager);
+        }
+        if (this.ropHandlers.size === 0) {
+            for (const HandlerClass of this.ropHandlerClasses) {
+                const handler: RopHandler = await this._objectFactory.newInstance(HandlerClass);
+                this.ropHandlers.set(handler.ropId, handler);
+            }
         }
     }
 

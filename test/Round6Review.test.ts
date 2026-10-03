@@ -29,6 +29,7 @@ import { RopReadStreamHandler } from "../src/rop/RopReadStreamHandler.js";
 import { RopSaveChangesMessageHandler } from "../src/rop/RopSaveChangesMessageHandler.js";
 import { MAX_INVITE_REQUEST_ATTEMPTS, RopSubmitMessageHandler } from "../src/rop/RopSubmitMessageHandler.js";
 import { FakeRedisClient } from "./fakeRedis.js";
+import { buildSessionManager } from "./managerFactory.js";
 
 function makeContext(overrides: Partial<RopContext> = {}): RopContext {
     return {
@@ -309,24 +310,19 @@ describe("Meeting invites for submitted revisions only", () => {
 });
 
 describe("In-progress markers", () => {
-    function redisManager(): MapiSessionManager {
-        const manager = new MapiSessionManager();
-        (manager as any).redisClient = new FakeRedisClient();
-        manager.init();
-        return manager;
+    async function redisManager(): Promise<MapiSessionManager> {
+        return buildSessionManager(new FakeRedisClient());
     }
 
-    function memoryManager(): MapiSessionManager {
-        const manager = new MapiSessionManager();
-        manager.init();
-        return manager;
+    async function memoryManager(): Promise<MapiSessionManager> {
+        return buildSessionManager();
     }
 
     it.each([
         ["memory", memoryManager],
         ["redis", redisManager],
     ])("Renews only a still-present marker for the same request, never over a stored response (%s).", async (_name, build) => {
-        const manager = build();
+        const manager = await build();
         expect(await manager.renewInProgress("s1", "r1")).toBe(false); // nothing there: nothing written
         expect(await manager.storedResponse("s1", "r1")).toBeUndefined();
 

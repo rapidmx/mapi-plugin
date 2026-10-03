@@ -56,16 +56,24 @@ export abstract class BaseMapiNspiRoute<M extends Mailbox> {
     @Logger
     private logger: any;
 
+    /** Builds the mailbox and contact repositories once, here, rather than lazily in `dispatch()`. */
     @Init
-    public async init(): Promise<void> {
-        this.mailboxRepo = await this._objectFactory!.newInstance(RepoUtils, {
-            name: this.mailboxClass.name,
-            args: [this.mailboxClass],
-        });
-        this.contactRepo = await this._objectFactory!.newInstance(RepoUtils, {
-            name: this.contactClass.name,
-            args: [this.contactClass],
-        });
+    protected async initialize(): Promise<void> {
+        if (!this._objectFactory) {
+            throw new Error("objectFactory is not set.");
+        }
+        if (!this.mailboxRepo && this.mailboxClass) {
+            this.mailboxRepo = await this._objectFactory.newInstance(RepoUtils, {
+                name: this.mailboxClass.name,
+                args: [this.mailboxClass],
+            });
+        }
+        if (!this.contactRepo && this.contactClass) {
+            this.contactRepo = await this._objectFactory.newInstance(RepoUtils, {
+                name: this.contactClass.name,
+                args: [this.contactClass],
+            });
+        }
     }
 
     @Auth(["jwt"])

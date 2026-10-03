@@ -18,18 +18,14 @@ import {
 } from "../src/MapiSessionManager.js";
 import { MemoryHandleDataStore, RedisHandleDataStore } from "../src/rop/HandleDataCache.js";
 import { FakeRedisClient } from "./fakeRedis.js";
+import { buildSessionManager } from "./managerFactory.js";
 
-function memoryManager(): MapiSessionManager {
-    const manager = new MapiSessionManager();
-    manager.init();
-    return manager;
+async function memoryManager(): Promise<MapiSessionManager> {
+    return buildSessionManager();
 }
 
-function redisManager(client: FakeRedisClient): MapiSessionManager {
-    const manager = new MapiSessionManager();
-    (manager as any).redisClient = client;
-    manager.init();
-    return manager;
+async function redisManager(client: FakeRedisClient): Promise<MapiSessionManager> {
+    return buildSessionManager(client);
 }
 
 describe("MapiSessionManager Tests", () => {
@@ -38,11 +34,11 @@ describe("MapiSessionManager Tests", () => {
     });
 
     describe.each([
-        ["memory", () => ({ manager: memoryManager() })],
-        ["redis", () => ({ manager: redisManager(new FakeRedisClient()) })],
+        ["memory", async () => ({ manager: await memoryManager() })],
+        ["redis", async () => ({ manager: await redisManager(new FakeRedisClient()) })],
     ])("on the %s store", (_name, build) => {
         it("Round-trips a session, handing out an independent copy on every load.", async () => {
-            const { manager } = build();
+            const { manager } = await build();
             const created = await manager.create("mailbox-1", "user-1");
 
             const first = (await manager.load(created.uid))!;
@@ -56,7 +52,7 @@ describe("MapiSessionManager Tests", () => {
         });
 
         it("Saves compare-and-set on version: the second of two overlapping saves conflicts and keeps nothing.", async () => {
-            const { manager } = build();
+            const { manager } = await build();
             const created = await manager.create("mailbox-1", "user-1");
             const requestA = (await manager.load(created.uid))!;
             const requestB = (await manager.load(created.uid))!;
@@ -75,7 +71,7 @@ describe("MapiSessionManager Tests", () => {
         });
 
         it("Compares the separate version entry, not the version inside the session JSON.", async () => {
-            const { manager } = build();
+            const { manager } = await build();
             const created = await manager.create("mailbox-1", "user-1");
             const loaded = (await manager.load(created.uid))!;
             // A client can't forge its way past a conflict by carrying a different version in the JSON it saves.
@@ -86,7 +82,7 @@ describe("MapiSessionManager Tests", () => {
         });
 
         it("Reports a save of a destroyed session as missing instead of recreating it.", async () => {
-            const { manager } = build();
+            const { manager } = await build();
             const created = await manager.create("mailbox-1", "user-1");
             const loaded = (await manager.load(created.uid))!;
             await manager.destroy(created.uid);
@@ -96,7 +92,7 @@ describe("MapiSessionManager Tests", () => {
         });
 
         it("Refuses to save a session larger than MAX_SESSION_BYTES, keeping the stored one.", async () => {
-            const { manager } = build();
+            const { manager } = await build();
             const created = await manager.create("mailbox-1", "user-1");
             const loaded = (await manager.load(created.uid))!;
             loaded.handles[1] = { type: "table", entityUid: "folder:x", rows: ["x".repeat(MAX_SESSION_BYTES)] };
@@ -107,7 +103,7 @@ describe("MapiSessionManager Tests", () => {
         });
 
         it("Ends a session older than MAX_SESSION_LIFETIME_MS on load, however recently it was used.", async () => {
-            const { manager } = build();
+            const { manager } = await build();
             const created = await manager.create("mailbox-1", "user-1");
             const loaded = (await manager.load(created.uid))!;
             loaded.createdAt = new Date(Date.now() - MAX_SESSION_LIFETIME_MS - 1000).toISOString();
@@ -118,7 +114,7 @@ describe("MapiSessionManager Tests", () => {
         });
 
         it("Holds at most MAX_SESSIONS_PER_USER sessions per user, ending the oldest first, without touching other users.", async () => {
-            const { manager } = build();
+            const { manager } = await build();
             const other = await manager.create("mailbox-2", "user-2");
             const sessions = [];
             for (let i = 0; i < MAX_SESSIONS_PER_USER; i++) {
@@ -139,7 +135,7 @@ describe("MapiSessionManager Tests", () => {
         });
 
         it("Keeps the per-user cap when many Connects run concurrently.", async () => {
-            const { manager } = build();
+            const { manager } = await build();
             const created = await Promise.all(Array.from({ length: MAX_SESSIONS_PER_USER * 2 }, () => manager.create("mailbox-1", "user-1")));
 
             const live = (await Promise.all(created.map((session) => manager.load(session.uid)))).filter(Boolean);
@@ -147,7 +143,7 @@ describe("MapiSessionManager Tests", () => {
         });
 
         it("Lets one request at a time hold a session's lock, released only by its own token.", async () => {
-            const { manager } = build();
+            const { manager } = await build();
             const token = await manager.acquireLock("session-1");
             expect(token).toEqual(expect.any(String));
             expect(await manager.acquireLock("session-1")).toBeUndefined();
@@ -160,7 +156,7 @@ describe("MapiSessionManager Tests", () => {
         });
 
         it("Remembers the last response for its X-RequestId only.", async () => {
-            const { manager } = build();
+            const { manager } = await build();
             expect(await manager.storedResponse("session-1", "req-1")).toBeUndefined();
 
             await manager.storeResponse("session-1", "req-1", Buffer.from([1, 2, 3]));
@@ -173,15 +169,15 @@ describe("MapiSessionManager Tests", () => {
         });
     });
 
-    it("Uses shared handle data storage on Redis, and process memory otherwise.", () => {
-        expect(memoryManager().handleDataStore).toBeInstanceOf(MemoryHandleDataStore);
-        expect(redisManager(new FakeRedisClient()).handleDataStore).toBeInstanceOf(RedisHandleDataStore);
+    it("Uses shared handle data storage on Redis, and process memory otherwise.", async () => {
+        expect((await memoryManager()).handleDataStore).toBeInstanceOf(MemoryHandleDataStore);
+        expect((await redisManager(new FakeRedisClient())).handleDataStore).toBeInstanceOf(RedisHandleDataStore);
     });
 
     it("Redis store: never serves a stale per-process copy - a change saved through another replica is seen on the next load.", async () => {
         const client = new FakeRedisClient();
-        const podA = redisManager(client);
-        const podB = redisManager(client);
+        const podA = await redisManager(client);
+        const podB = await redisManager(client);
         const created = await podA.create("mailbox-1", "user-1");
         await podA.load(created.uid); // would have primed a local cache before
 
@@ -194,7 +190,7 @@ describe("MapiSessionManager Tests", () => {
 
     it("Redis store: saves through the compare-and-set script against the version key, with the session TTL.", async () => {
         const client = new FakeRedisClient();
-        const manager = redisManager(client);
+        const manager = await redisManager(client);
         const created = await manager.create("mailbox-1", "user-1");
         const loaded = (await manager.load(created.uid))!;
 
@@ -213,7 +209,7 @@ describe("MapiSessionManager Tests", () => {
 
     it("Redis store: takes the lock with SET NX and a TTL.", async () => {
         const client = new FakeRedisClient();
-        await redisManager(client).acquireLock("s1");
+        await (await redisManager(client)).acquireLock("s1");
         expect(client.eval).toHaveBeenCalledWith(ACQUIRE_LOCK_SCRIPT, { keys: ["mapi.session.{s1}.lock"], arguments: [expect.any(String), String(SESSION_LOCK_TTL_MS)] });
     });
 

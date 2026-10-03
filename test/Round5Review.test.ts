@@ -52,6 +52,7 @@ import { RopSaveChangesMessageHandler } from "../src/rop/RopSaveChangesMessageHa
 import { RopSetPropertiesHandler } from "../src/rop/RopSetPropertiesHandler.js";
 import { RopWriteStreamHandler } from "../src/rop/RopWriteStreamHandler.js";
 import { FakeRedisClient } from "./fakeRedis.js";
+import { buildSessionManager } from "./managerFactory.js";
 import { InMemoryBlobStore } from "./testDoubles.js";
 
 function makeContext(overrides: Partial<RopContext> = {}): RopContext {
@@ -300,25 +301,20 @@ describe("HandleDataStore quota details", () => {
 });
 
 describe("Session lifecycle", () => {
-    function redisManager(client: FakeRedisClient): MapiSessionManager {
-        const manager = new MapiSessionManager();
-        (manager as any).redisClient = client;
-        manager.init();
-        return manager;
+    async function redisManager(client: FakeRedisClient): Promise<MapiSessionManager> {
+        return buildSessionManager(client);
     }
 
-    function memoryManager(): MapiSessionManager {
-        const manager = new MapiSessionManager();
-        manager.init();
-        return manager;
+    async function memoryManager(): Promise<MapiSessionManager> {
+        return buildSessionManager();
     }
 
     describe.each([
         ["memory", memoryManager],
-        ["redis", () => redisManager(new FakeRedisClient())],
+        ["redis", async () => redisManager(new FakeRedisClient())],
     ])("on the %s store", (_name, build) => {
         it("Renews a lock only for the token holding it.", async () => {
-            const manager = build();
+            const manager = await build();
             const token = (await manager.acquireLock("s1"))!;
             expect(await manager.renewLock("s1", "not-it")).toBe(false);
             expect(await manager.renewLock("s1", token)).toBe(true);
@@ -329,7 +325,7 @@ describe("Session lifecycle", () => {
         it("Ends the least recently used session at the cap, not the oldest one.", async () => {
             vi.useFakeTimers();
             try {
-                const manager = build();
+                const manager = await build();
                 const sessions: MapiSessionContext[] = [];
                 for (let i = 0; i < MAX_SESSIONS_PER_USER; i++) {
                     vi.advanceTimersByTime(1000);
@@ -350,7 +346,7 @@ describe("Session lifecycle", () => {
         });
 
         it("Marks a request in progress, then replaces the marker with its response; a cleared marker lets it run.", async () => {
-            const manager = build();
+            const manager = await build();
             await manager.markInProgress("s1", "r1");
             expect(await manager.storedResponse("s1", "r1")).toBe("inProgress");
             expect(await manager.storedResponse("s1", "r2")).toBeUndefined();
@@ -367,7 +363,7 @@ describe("Session lifecycle", () => {
         });
 
         it("Deletes a session's handle data when it is destroyed or evicted, ignoring a store failure.", async () => {
-            const manager = build();
+            const manager = await build();
             const deleteOwnedBy = vi.spyOn(manager.handleDataStore, "deleteOwnedBy");
             const sessions: MapiSessionContext[] = [];
             for (let i = 0; i < MAX_SESSIONS_PER_USER; i++) {
@@ -385,7 +381,7 @@ describe("Session lifecycle", () => {
 
     it("Renews through its Redis script with the lock TTL.", async () => {
         const client = new FakeRedisClient();
-        const manager = redisManager(client);
+        const manager = await redisManager(client);
         const token = (await manager.acquireLock("s9"))!;
         await manager.renewLock("s9", token);
         expect(client.eval).toHaveBeenLastCalledWith(RENEW_LOCK_SCRIPT, { keys: ["mapi.session.{s9}.lock"], arguments: [token, String(SESSION_LOCK_TTL_MS)] });

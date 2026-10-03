@@ -4,7 +4,7 @@
 ///////////////////////////////////////////////////////////////////////////////
 import * as crypto from "crypto";
 import { ObjectDecorators } from "@rapidrest/core";
-import { DatabaseDecorators, SimpleEntity } from "@rapidrest/service-core";
+import { DatabaseDecorators, ObjectFactory, SimpleEntity } from "@rapidrest/service-core";
 import {
     handleDataCache,
     handleDataKey,
@@ -504,6 +504,9 @@ function userIndexKey(userUid: string): string {
  * the same request is answered again instead of being run twice.
  */
 export class MapiSessionManager {
+    // Automatically injected by ObjectFactory on instantiation
+    private _objectFactory?: ObjectFactory;
+
     @Redis("cache", false)
     private redisClient?: any;
 
@@ -513,10 +516,29 @@ export class MapiSessionManager {
      * so any replica can continue a transfer. */
     public handleDataStore?: HandleDataStore;
 
+    /** Builds the session store and the handle-data store once, here: Redis-backed when a `cache` datasource is
+     * configured, otherwise in-process. Each is skipped when already set. */
     @Init
-    public init(): void {
-        this.store = this.redisClient ? new RedisMapiSessionStore(this.redisClient) : new MemoryMapiSessionStore();
-        this.handleDataStore = this.redisClient ? new RedisHandleDataStore(this.redisClient) : new MemoryHandleDataStore();
+    public async init(): Promise<void> {
+        if (!this._objectFactory) {
+            throw new Error("objectFactory is not set.");
+        }
+        if (!this.store) {
+            this.store = this.redisClient
+                ? await this._objectFactory.newInstance(RedisMapiSessionStore, {
+                      name: "RedisMapiSessionStore",
+                      args: [this.redisClient],
+                  })
+                : await this._objectFactory.newInstance(MemoryMapiSessionStore, { name: "MemoryMapiSessionStore" });
+        }
+        if (!this.handleDataStore) {
+            this.handleDataStore = this.redisClient
+                ? await this._objectFactory.newInstance(RedisHandleDataStore, {
+                      name: "RedisHandleDataStore",
+                      args: [this.redisClient],
+                  })
+                : await this._objectFactory.newInstance(MemoryHandleDataStore, { name: "MemoryHandleDataStore" });
+        }
     }
 
     /** Creates a session for `userUid`, ending that user's least recently used sessions (and their stored handle data)
