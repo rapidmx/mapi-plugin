@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-03
+
+### Changed
+- Document the accidental 1.0.0 release (release patch dropped the beta prerelease tag instead of advancing it) and JP's decision to accept it and continue forward rather than attempt an unpublish, in NOTES and RELEASE_NOTES
+- Record the audit log of the messages through the AuditLogUtils service of restapi 0.30, built once in the hook of the route
+- Require restapi 0.30 or later
+
 ## [1.0.0] - 2026-09-28
 
 ### Added
@@ -279,7 +286,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 - Removed unused files
 
-[Unreleased]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/rapidmx/mapi-plugin/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0-beta.18...v1.0.0
 [1.0.0-beta.18]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0-beta.17...v1.0.0-beta.18
 [1.0.0-beta.17]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0-beta.16...v1.0.0-beta.17

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v1.1.0
+
 ## v1.0.0
 
 Published by mistake as a release-tooling error (`release patch` on a `1.0.0-beta.18` prerelease drops the
