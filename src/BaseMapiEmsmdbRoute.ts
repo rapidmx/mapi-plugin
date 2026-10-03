@@ -21,16 +21,16 @@ import { handleDataOwners, type HandleDataStore } from "./rop/HandleDataCache.js
 import { handleDataStoreOf, type RopContext, type RopHandler } from "./rop/RopHandler.js";
 import { ScanPipeline } from "@rapidmx/restapi/scan";
 import {
+    AuditLogUtils,
     Folder,
     Mailbox,
     RecoverableRepoUtils,
-    recordAuditLog,
     refreshFolderCounts,
     resolveCallerMailboxUid,
     type BlobStore,
     type FolderCountsContext,
 } from "@rapidmx/restapi";
-const { Config, Init, Inject, Logger } = ObjectDecorators;
+const { Init, Inject, Logger } = ObjectDecorators;
 const { Auth, Post, Request, Response, User: AuthUser } = RouteDecorators;
 
 /** `[MS-OXCMAPIHTTP]` `X-ResponseCode` 10, "Context Not Found": the session context named by the `MapiContext`
@@ -150,6 +150,7 @@ export abstract class BaseMapiEmsmdbRoute<M extends Mailbox> {
     private contactRepo?: RepoUtils<any>;
     private taskRepo?: RepoUtils<any>;
     private labelRepo?: RepoUtils<any>;
+    private auditLogUtils?: AuditLogUtils;
     private sessionManager?: MapiSessionManager;
     private readonly ropHandlers = new Map<number, RopHandler>();
 
@@ -170,45 +171,55 @@ export abstract class BaseMapiEmsmdbRoute<M extends Mailbox> {
     @Logger
     private logger: any;
 
-    @Config()
-    private config?: any;
-
     @Init
     public async init(): Promise<void> {
-        this.mailboxRepo = await this._objectFactory!.newInstance(RepoUtils, {
+        if (!this._objectFactory) {
+            throw new Error("objectFactory is not set.");
+        }
+        this.mailboxRepo = await this._objectFactory.newInstance(RepoUtils, {
             name: this.mailboxClass.name,
             args: [this.mailboxClass],
         });
-        this.folderRepo = await this._objectFactory!.newInstance(RecoverableRepoUtils, {
+        this.folderRepo = await this._objectFactory.newInstance(RecoverableRepoUtils, {
             name: this.folderClass.name,
             args: [this.folderClass],
         });
-        this.messageRepo = await this._objectFactory!.newInstance(RecoverableRepoUtils, {
+        this.messageRepo = await this._objectFactory.newInstance(RecoverableRepoUtils, {
             name: this.messageClass.name,
             args: [this.messageClass],
         });
-        this.calendarEventRepo = await this._objectFactory!.newInstance(RecoverableRepoUtils, {
+        this.calendarEventRepo = await this._objectFactory.newInstance(RecoverableRepoUtils, {
             name: this.calendarEventClass.name,
             args: [this.calendarEventClass],
         });
-        this.contactRepo = await this._objectFactory!.newInstance(RecoverableRepoUtils, {
+        this.contactRepo = await this._objectFactory.newInstance(RecoverableRepoUtils, {
             name: this.contactClass.name,
             args: [this.contactClass],
         });
-        this.taskRepo = await this._objectFactory!.newInstance(RecoverableRepoUtils, {
+        this.taskRepo = await this._objectFactory.newInstance(RecoverableRepoUtils, {
             name: this.taskClass.name,
             args: [this.taskClass],
         });
         // Label extends plain BaseEntity, not RecoverableBaseEntity (see restapi's own model doc comment) - no
         // soft-delete support to preserve, so a plain RepoUtils is correct here, matching mailboxRepo's own
         // choice for the identical reason.
-        this.labelRepo = await this._objectFactory!.newInstance(RepoUtils, {
+        this.labelRepo = await this._objectFactory.newInstance(RepoUtils, {
             name: this.labelClass.name,
             args: [this.labelClass],
         });
-        this.sessionManager = await this._objectFactory!.newInstance(MapiSessionManager);
+        if (this.auditLogClass) {
+            const auditLogRepo = await this._objectFactory.newInstance(RepoUtils, {
+                name: this.auditLogClass.name,
+                args: [this.auditLogClass],
+            });
+            this.auditLogUtils = await this._objectFactory.newInstance(AuditLogUtils, {
+                name: this.auditLogClass.name,
+                args: [auditLogRepo],
+            });
+        }
+        this.sessionManager = await this._objectFactory.newInstance(MapiSessionManager);
         for (const HandlerClass of this.ropHandlerClasses) {
-            const handler: RopHandler = await this._objectFactory!.newInstance(HandlerClass);
+            const handler: RopHandler = await this._objectFactory.newInstance(HandlerClass);
             this.ropHandlers.set(handler.ropId, handler);
         }
     }
@@ -461,10 +472,7 @@ export abstract class BaseMapiEmsmdbRoute<M extends Mailbox> {
             scanPipeline: this.scanPipeline!,
             mailTransport: this.mailTransport!,
             handleData: this.sessionManager!.handleDataStore,
-            audit: this.auditLogClass
-                ? (params) =>
-                      recordAuditLog(this._objectFactory!, this.auditLogClass, { config: this.config, req, user, logger: this.logger }, params)
-                : undefined,
+            audit: this.auditLogUtils ? (params) => this.auditLogUtils!.record(params, { req, user }) : undefined,
             notifyFolderCounts: (folderUids, options) => refreshFolderCounts(this.folderCountsContext(), folderUids, options),
         };
         // RopSize (2 bytes) and the echoed handle table share MaxRopOut with the ROP responses. dispatchRops only throws

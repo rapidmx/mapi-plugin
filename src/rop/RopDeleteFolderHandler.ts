@@ -51,7 +51,7 @@ const UID_SORT: RepoSort = { uid: "ASC" };
  * silently cascading.
  *
  * **Always a soft delete.** `DELETE_HARD_DELETE` is ignored. A permanent delete has to go through restapi's legal
- * hold check first (the REST routes call `LegalHoldUtils.assertNotOnLegalHold()` for `purge=true`), and that helper
+ * hold check first (the REST routes check legal holds for `purge=true`), and that check
  * isn't part of `@rapidmx/restapi`'s public exports. A soft-deleted item stays recoverable and discoverable, which is
  * exactly what a hold requires, so MAPI never purges. Each deleted message is audited as `MESSAGE_DELETE`, like the
  * REST message route.
