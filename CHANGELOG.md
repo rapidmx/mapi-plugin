@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-10-04
+
+### Changed
+- Publish a prerelease version to npm under the next tag, which npm requires, and a release under latest
+- Build the repositories of the Exchange and address book routes once in a guarded @Init hook, and the stores of the session manager through the ObjectFactory
+- Update @rapidmx/restapi to 0.30.1 A message a user sends is no longer refused with a 422 for a middling spam score or an rspamd greylist action
+
 ## [1.1.0] - 2026-10-03
 
 ### Changed
@@ -286,7 +293,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 - Removed unused files
 
-[Unreleased]: https://github.com/rapidmx/mapi-plugin/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/rapidmx/mapi-plugin/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/rapidmx/mapi-plugin/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0-beta.18...v1.0.0
 [1.0.0-beta.18]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0-beta.17...v1.0.0-beta.18
