@@ -30,6 +30,7 @@ export async function resolveContentsKind(folderUid: string, context: RopContext
         case FolderType.CALENDAR:
             return "calendarEvent";
         case FolderType.CONTACTS:
+        case FolderType.SUGGESTED_CONTACTS:
             return "contact";
         case FolderType.TASKS:
             return "task";

@@ -77,6 +77,7 @@ describe("RopGetContentsTableHandler Tests", () => {
     it.each([
         ["calendar", "calendarEvent"],
         ["contacts", "contact"],
+        ["suggested_contacts", "contact"],
         ["tasks", "task"],
     ])("Records a %s folder's contents as %s rows.", async (folderType, contentsKind) => {
         const folderRepo = { findOne: vi.fn().mockResolvedValue({ uid: "f1", type: folderType }) };
