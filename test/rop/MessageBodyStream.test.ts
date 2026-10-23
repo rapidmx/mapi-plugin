@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Jean-Philippe Steinmetz
 // SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
-import { PID_TAG_BODY, resolveMessageBodyBytes } from "../../src/rop/MessageBodyStream.js";
+import { PID_TAG_BODY, resolveMessageBodyBytes, ZERO_ACCESS_PLACEHOLDER_TEXT } from "../../src/rop/MessageBodyStream.js";
 import { InMemoryBlobStore } from "../testDoubles.js";
 
 describe("MessageBodyStream Tests", () => {
@@ -40,5 +40,15 @@ describe("MessageBodyStream Tests", () => {
 
         const expected = Buffer.concat([Buffer.from("", "utf16le"), Buffer.from([0x00, 0x00])]);
         expect(bytes).toEqual(expected);
+    });
+
+    it("Serves the explanation for a zero-access message, never reading its sealed body.", async () => {
+        const blobStore = { get: vi.fn() };
+        const messageRepo = { findOne: vi.fn().mockResolvedValue({ uid: "m3", bodyBlobKey: "za/mbx/m3", zeroAccess: { keyFingerprint: "fp", sealedSummary: "x" } }) };
+
+        const bytes = await resolveMessageBodyBytes("message:m3", messageRepo as any, blobStore as any);
+
+        expect(bytes).toEqual(Buffer.concat([Buffer.from(ZERO_ACCESS_PLACEHOLDER_TEXT, "utf16le"), Buffer.from([0x00, 0x00])]));
+        expect(blobStore.get).not.toHaveBeenCalled();
     });
 });

@@ -893,3 +893,9 @@ While rolling the day's restapi 0.25.1 dependency bump out to every plugin, ran 
 **Consequence for future releases of this package**: mapi is no longer on the beta prerelease track. Future releases are ordinary `patch`/`minor`/`major` bumps from `1.0.0` (`1.0.1`, `1.1.0`, etc.) via `npx @rapidrest/cli release <level>` directly - no `--preid beta`, no prerelease command. The underlying code at `1.0.0` is exactly what `1.0.0-beta.18` was plus the restapi 0.25.1 dependency bump - nothing skipped, nothing untested (full suite was green before the release) - only the version *number* is earlier than intended; the actual Outlook/MAPI-HTTP connectivity investigation (see this file's many earlier 2026-09-2x entries) is very much still open despite what "1.0.0" nominally signals about stability. `dist-tags` on npm: `latest` now correctly `1.0.0`; `next` is stale at `1.0.0-beta.18` (harmless - nothing points consumers at it, and it predates a version now behind `latest`) and hasn't been cleaned up.
 
 **Lesson for every other repo still on a `beta.N` prerelease** (activesync, at the time of writing): the release command for those must be `npx @rapidrest/cli release prerelease --preid beta`, never a bare `patch`/`minor`/`major` level - those silently drop the prerelease tag instead of advancing it.
+
+## 2026-10-22 - Zero-access encryption: placeholder body
+
+- `resolveMessageBodyBytes` serves `ZERO_ACCESS_PLACEHOLDER_TEXT` for a zero-access message (`Message.zeroAccess`, read structurally because the field is newer than the published restapi) instead of parsing its sealed S/MIME blob.
+- Real S/MIME over MAPI needs attachment objects (`PidTagAttachDataBinary` for `smime.p7m`), which this server does not implement yet.
+- **Not done yet:** `RopSubmitMessageHandler` still files Sent copies in plaintext until it can use restapi's `ZeroAccessWriter` (after a restapi release).

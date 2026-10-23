@@ -16,6 +16,12 @@ import type { RopContext } from "./RopHandler.js";
  * documented gap (see `RopOpenStreamHandler`'s own doc comment). */
 export const PID_TAG_BODY = 0x1000;
 
+/** The body Outlook shows for a zero-access message (@rapidmx/restapi `specs/search.md` §3): mail the server encrypted at rest on
+ * arrival and can't read. Serving it as S/MIME needs MAPI attachment objects, which this server doesn't implement yet, so Outlook over
+ * MAPI gets this explanation instead (ActiveSync serves the S/MIME message itself). */
+export const ZERO_ACCESS_PLACEHOLDER_TEXT =
+    "This message is encrypted. Read it in RapidMX, or in a mail app with your RapidMX encryption keys installed.";
+
 /**
  * Resolves a `"message:<uid>"` target's plain-text body as the exact byte sequence `RopReadStream` must serve
  * for a streamed `PtypString` property - confirmed via `[MS-OXCPRPT]`'s `RopOpenStream` page ("a string of
@@ -37,6 +43,12 @@ export async function resolveMessageBodyBytes(target: string, messageRepo: RepoU
     const message: Message | undefined = await messageRepo.findOne(uid, { ignoreACL: true });
     if (!message) {
         return Buffer.alloc(0);
+    }
+    // Read structurally: `Message.zeroAccess` is newer than the @rapidmx/restapi this builds against.
+    if ((message as { zeroAccess?: unknown }).zeroAccess) {
+        const writer = new BufferWriter();
+        writer.writeNullTerminatedUtf16LE(ZERO_ACCESS_PLACEHOLDER_TEXT);
+        return writer.toBuffer();
     }
     const raw = await blobStore.get(message.bodyBlobKey);
     budget?.chargeBytes(raw.length);
