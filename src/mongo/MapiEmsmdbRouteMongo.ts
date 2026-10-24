@@ -5,6 +5,7 @@
 import {
     AuditLogEntryMongo,
     CalendarEventMongo,
+    EncryptionPolicyMongo,
     ContactMongo,
     FolderMongo,
     LabelMongo,
@@ -51,6 +52,7 @@ export class MapiEmsmdbRouteMongo extends BaseMapiEmsmdbRoute<MailboxMongo> {
     protected folderClass: any = FolderMongo;
     protected messageClass: any = MessageMongo;
     protected calendarEventClass: any = CalendarEventMongo;
+    protected encryptionPolicyClass: any = EncryptionPolicyMongo;
     protected contactClass: any = ContactMongo;
     protected taskClass: any = TaskMongo;
     protected labelClass: any = LabelMongo;

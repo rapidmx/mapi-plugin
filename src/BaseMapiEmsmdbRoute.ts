@@ -24,11 +24,13 @@ import {
     AuditLogUtils,
     Folder,
     Mailbox,
+    newZeroAccessRecordSealer,
     RecoverableRepoUtils,
     refreshFolderCounts,
     resolveCallerMailboxUid,
     type BlobStore,
     type FolderCountsContext,
+    type ZeroAccessRecordSealer,
 } from "@rapidmx/restapi";
 const { Init, Inject, Logger } = ObjectDecorators;
 const { Auth, Post, Request, Response, User: AuthUser } = RouteDecorators;
@@ -132,6 +134,9 @@ export abstract class BaseMapiEmsmdbRoute<M extends Mailbox> {
     protected abstract folderClass: any;
     protected abstract messageClass: any;
     protected abstract calendarEventClass: any;
+    /** The backend's `EncryptionPolicy` model, for sealing what Outlook saves into a calendar zero-access encryption protects. Without
+     * it nothing is sealed. */
+    protected encryptionPolicyClass?: any;
     protected abstract contactClass: any;
     protected abstract taskClass: any;
     protected abstract labelClass: any;
@@ -150,6 +155,7 @@ export abstract class BaseMapiEmsmdbRoute<M extends Mailbox> {
     private folderRepo?: RepoUtils<Folder>;
     private messageRepo?: RepoUtils<any>;
     private calendarEventRepo?: RepoUtils<any>;
+    private recordSealer?: ZeroAccessRecordSealer;
     private contactRepo?: RepoUtils<any>;
     private taskRepo?: RepoUtils<any>;
     private labelRepo?: RepoUtils<any>;
@@ -208,6 +214,7 @@ export abstract class BaseMapiEmsmdbRoute<M extends Mailbox> {
                 args: [this.calendarEventClass],
             });
         }
+        this.recordSealer ??= await newZeroAccessRecordSealer(this._objectFactory, this.encryptionPolicyClass);
         if (!this.contactRepo && this.contactClass) {
             this.contactRepo = await this._objectFactory.newInstance(RecoverableRepoUtils, {
                 name: this.contactClass.name,
@@ -504,6 +511,7 @@ export abstract class BaseMapiEmsmdbRoute<M extends Mailbox> {
             folderRepo: this.folderRepo!,
             messageRepo: this.messageRepo!,
             calendarEventRepo: this.calendarEventRepo!,
+            recordSealer: this.recordSealer,
             contactRepo: this.contactRepo!,
             taskRepo: this.taskRepo!,
             labelRepo: this.labelRepo!,

@@ -7,6 +7,7 @@
 export {
     AuditLogEntryMongo,
     CalendarEventMongo,
+    EncryptionPolicyMongo,
     ContactMongo,
     FolderMongo,
     LabelMongo,

@@ -148,6 +148,7 @@ export class RopSaveChangesMessageHandler implements RopHandler {
             isOrganizer: false,
         }));
 
+        const mailbox = await context.mailboxRepo.findOne(context.mailboxUid, { ignoreACL: true });
         if (handle.entityUid.startsWith("calendarEvent:")) {
             const uid = handle.entityUid.slice("calendarEvent:".length);
             const existing: (CalendarEvent & { uid: string; version: number }) | undefined = await context.calendarEventRepo.findOne(uid, {
@@ -176,28 +177,25 @@ export class RopSaveChangesMessageHandler implements RopHandler {
                             : existing.attendees,
                 };
                 const sequence: number = (existing.sequence ?? 0) + (isSchedulingRelevantChange(existing, updated) ? 1 : 0);
-                await context.calendarEventRepo.update(
-                    {
-                        ...updated,
-                        sequence,
-                        // Saving sends nothing, so this revision counts as handled - unless a submitted revision is still
-                        // waiting for the job, which then sends the meeting as it now stands rather than not at all.
-                        inviteSequenceSent: isInvitePending(existing) ? (existing.inviteSequenceSent ?? null) : sequence,
-                    },
-                    asEntity(context.calendarEventRepo, existing),
-                    { ignoreACL: true },
-                );
+                const patch: Record<string, any> = {
+                    ...updated,
+                    sequence,
+                    // Saving sends nothing, so this revision counts as handled - unless a submitted revision is still
+                    // waiting for the job, which then sends the meeting as it now stands rather than not at all.
+                    inviteSequenceSent: isInvitePending(existing) ? (existing.inviteSequenceSent ?? null) : sequence,
+                };
+                // A protected calendar's event is sealed; the placeholders Outlook shows and sends back are ignored.
+                await context.recordSealer?.sealWrite("calendar", mailbox, patch, existing);
+                await context.calendarEventRepo.update(patch, asEntity(context.calendarEventRepo, existing), { ignoreACL: true });
             }
             return BigInt(assignOrGetMid(context.session, handle.entityUid));
         }
 
-        const mailbox = await context.mailboxRepo.findOne(context.mailboxUid, { ignoreACL: true });
         // draftFolderUid is a "folder:<uid>"-prefixed target string (RopCreateMessageHandler stores the same
         // target FolderTarget.assignOrGetFid assigned), not a bare uid - strip the prefix before persisting.
         const draftFolderTarget = handle.draftFolderUid ?? "";
         const folderUid = draftFolderTarget.startsWith("folder:") ? draftFolderTarget.slice("folder:".length) : draftFolderTarget;
-        const created: CalendarEvent & { uid: string } = await context.calendarEventRepo.create(
-            new context.calendarEventClass({
+        const fields: Record<string, any> = {
                 folderUid,
                 mailboxUid: context.mailboxUid,
                 title: decoded.title ?? "",
@@ -214,9 +212,9 @@ export class RopSaveChangesMessageHandler implements RopHandler {
                 sequence: 0,
                 // Handled until submitted: saving a meeting doesn't invite its attendees.
                 inviteSequenceSent: 0,
-            }),
-            { ignoreACL: true },
-        );
+        };
+        await context.recordSealer?.sealWrite("calendar", mailbox, fields);
+        const created: CalendarEvent & { uid: string } = await context.calendarEventRepo.create(new context.calendarEventClass(fields), { ignoreACL: true });
         handle.entityUid = `calendarEvent:${created.uid}`;
         return BigInt(assignOrGetMid(context.session, handle.entityUid));
     }

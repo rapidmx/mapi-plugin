@@ -194,6 +194,29 @@ describe("RopSaveChangesMessageHandler Tests", () => {
             expect(options).toEqual({ ignoreACL: true });
         });
 
+        it("Seals what Outlook saves through the record sealer - with the mailbox, on a create and against the stored event on an update.", async () => {
+            const sealWrite = vi.fn(async (_type: string, _mailbox: any, patch: any) => {
+                patch.title = "Protected event";
+                patch.sealedFields = { title: "sealed" };
+            });
+            const existing = { uid: "evt1", version: 3, title: "Protected event", attendees: [], sealedFields: { title: "sealed" } };
+            const calendarEventRepo = { create: vi.fn().mockResolvedValue({ uid: "evt1" }), findOne: vi.fn().mockResolvedValue(existing), update: vi.fn() };
+            const context = makeContext({ recordSealer: { sealWrite } as any, calendarEventRepo: calendarEventRepo as any });
+            context.session.handles[5] = { type: "message", entityUid: "", draftFolderUid: "folder:cal1", draftProperties: { "55": "Board meeting", "26": "IPM.Appointment" } };
+            const handler = new RopSaveChangesMessageHandler();
+
+            await handler.handle(new BufferReader(buildRequest({})), new BufferWriter(), context);
+
+            expect(sealWrite).toHaveBeenCalledWith("calendar", { primarySmtpAddress: "owner@example.com", displayName: "Owner" }, expect.objectContaining({ folderUid: "cal1" }));
+            expect(calendarEventRepo.create.mock.calls[0][0]).toMatchObject({ title: "Protected event", sealedFields: { title: "sealed" } });
+
+            context.session.handles[5].draftProperties = { "55": "Board meeting moved", "26": "IPM.Appointment" };
+            await handler.handle(new BufferReader(buildRequest({})), new BufferWriter(), context);
+
+            expect(sealWrite).toHaveBeenLastCalledWith("calendar", expect.anything(), expect.objectContaining({ uid: "evt1" }), existing);
+            expect(calendarEventRepo.update.mock.calls[0][0]).toMatchObject({ title: "Protected event", sealedFields: { title: "sealed" } });
+        });
+
         it("Falls back to defaults for fields the client never set on a fresh create.", async () => {
             const context = makeContext();
             const calendarEventRepo = { create: vi.fn().mockResolvedValue({ uid: "evt2" }) };
