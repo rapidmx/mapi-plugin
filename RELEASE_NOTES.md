@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- **Zero-access encrypted mail has an explanatory body.** This server can't read a message stored with zero-access encryption (`@rapidmx/restapi` 0.34), so Outlook over MAPI shows a short explanation instead of its body: open it in RapidMX, or install the exported RapidMX keys.
+
 ## v1.2.0
 
 ## v1.1.1
