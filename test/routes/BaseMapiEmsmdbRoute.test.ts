@@ -73,3 +73,24 @@ describe("BaseMapiEmsmdbRoute Tests (guard clauses only)", () => {
         await expect(route.dispatch(makeReq(), makeRes(), undefined)).rejects.toThrow(/permission/i);
     });
 });
+
+describe("BaseMapiEmsmdbRoute.recordOutlook (isolated)", () => {
+    it("records Outlook on the mailbox, skips a recent record, and only logs a write that fails", async () => {
+        const route = new TestMapiEmsmdbRoute() as any;
+        route.logger = { warn: vi.fn() };
+        route.mailboxRepo = { update: vi.fn().mockResolvedValue({ version: 2 }) };
+        const mailbox: any = { uid: "mb", version: 1, syncClients: { activesync: { devices: [] } } };
+
+        await route.recordOutlook(mailbox, 1_000);
+        expect(route.mailboxRepo.update.mock.calls[0][0]).toEqual({ uid: "mb", version: 1, syncClients: { activesync: { devices: [] }, mapi: { lastSeenAt: 1_000 } } });
+
+        await route.recordOutlook({ uid: "mb", syncClients: { mapi: { lastSeenAt: 1_000 } } }, 2_000);
+        await route.recordOutlook(undefined, 2_000);
+        expect(route.mailboxRepo.update).toHaveBeenCalledTimes(1);
+
+        route.mailboxRepo.update.mockRejectedValueOnce(new Error("conflict"));
+        await route.recordOutlook({ uid: "mb2" });
+        expect(route.logger.warn).toHaveBeenCalledWith(expect.stringContaining("failed to record Outlook on mailbox mb2: conflict"));
+    });
+});
+

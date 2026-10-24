@@ -90,6 +90,9 @@ function firstHeader(req: HttpRequest, name: string): string | undefined {
     return Array.isArray(value) ? value[0] : value;
 }
 
+/** How often a Connect refreshes `Mailbox.syncClients.mapi` - Outlook connects many times a day. */
+export const OUTLOOK_SEEN_REFRESH_MS = 6 * 60 * 60 * 1000;
+
 /**
  * Abstract base for the single fixed EMSMDB endpoint (`POST /mapi/emsmdb` by `[MS-OXCMAPIHTTP]` convention,
  * though the concrete path is left to the consuming application to mount via `@Route(...)` - see
@@ -328,6 +331,24 @@ export abstract class BaseMapiEmsmdbRoute<M extends Mailbox> {
      * JWT" principle `BaseEasRoute`/`BaseSearchRoute` already apply via `resolveCallerMailboxUid`) - so the
      * request body is never decoded at all here.
      */
+    /**
+     * Records on the mailbox that Outlook syncs it (`Mailbox.syncClients.mapi`), at most every `OUTLOOK_SEEN_REFRESH_MS`: restapi
+     * leaves the data types Outlook can't read protected out of zero-access by default, and settings warn about the ones included
+     * (restapi `specs/search.md` §3 *What It Covers*). Bookkeeping - a failure is logged, never a failed Connect.
+     */
+    private async recordOutlook(mailbox: M | undefined, now: number = Date.now()): Promise<void> {
+        const seen: number | undefined = (mailbox as any)?.syncClients?.mapi?.lastSeenAt;
+        if (!mailbox || (seen !== undefined && now - seen < OUTLOOK_SEEN_REFRESH_MS)) {
+            return;
+        }
+        try {
+            const syncClients = { ...((mailbox as any).syncClients ?? {}), mapi: { lastSeenAt: now } };
+            Object.assign(mailbox, await this.mailboxRepo!.update({ uid: mailbox.uid, version: (mailbox as any).version, syncClients } as any, mailbox, { ignoreACL: true }));
+        } catch (err: any) {
+            this.logger?.warn(`BaseMapiEmsmdbRoute: failed to record Outlook on mailbox ${mailbox.uid}: ${err?.message}`);
+        }
+    }
+
     private async handleConnect(req: HttpRequest, res: HttpResponse, user: JWTUser): Promise<void> {
         // TEMPORARY DIAGNOSTIC LOGGING - see the matching comment in dispatch(). The request body is never
         // decoded (see this method's own doc comment on why), but real Outlook sends a real UserDn/Flags/
@@ -339,6 +360,7 @@ export abstract class BaseMapiEmsmdbRoute<M extends Mailbox> {
             throw new ApiError(ApiErrors.NOT_FOUND, 404, ApiErrorMessages.NOT_FOUND);
         }
         const mailbox: M | undefined = await this.mailboxRepo!.findOne(mailboxUid, { ignoreACL: true });
+        await this.recordOutlook(mailbox);
 
         const session: MapiSessionContext = await this.sessionManager!.create(mailboxUid, user.uid);
         // TEMPORARY DIAGNOSTIC LOGGING - see the matching comment in dispatch().

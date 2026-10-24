@@ -228,6 +228,15 @@ describe("Route:MapiEmsmdbRouteMongo Tests", () => {
             expect(cookie).toContain("MapiSequence=");
         });
 
+        it("Records on the mailbox that Outlook syncs it, refreshing that at most every few hours.", async () => {
+            const mailbox = await createMailbox(owner.uid, { syncClients: { activesync: { devices: [] } } });
+            expect((await connect()).status).toBe(200);
+            const recorded: any = await mailboxRepo.findOne({ uid: mailbox.uid } as any);
+            expect(recorded?.syncClients).toEqual({ activesync: { devices: [] }, mapi: { lastSeenAt: expect.any(Number) } });
+            expect((await connect()).status).toBe(200);
+            expect(((await mailboxRepo.findOne({ uid: mailbox.uid } as any)) as any)?.version).toBe(recorded.version);
+        });
+
         it("Never sends the framework's own CSRF cookie, only MAPI's own session cookies - a real Outlook capture never sent Cookie back at all until this was removed.", async () => {
             await createMailbox(owner.uid);
             const result = await connect();

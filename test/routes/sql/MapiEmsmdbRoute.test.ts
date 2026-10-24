@@ -197,6 +197,15 @@ describe("Route:MapiEmsmdbRouteSQL Tests", () => {
         expect(reader.readNullTerminatedUtf16LE()).toBe("Ada Lovelace");
     });
 
+    it("Records on the mailbox that Outlook syncs it, refreshing that at most every few hours.", async () => {
+        const mailbox = await createMailbox(owner.uid, { syncClients: { activesync: { devices: [] } } });
+        expect((await connect()).status).toBe(200);
+        const recorded: any = await mailboxRepo.findOne({ where: { uid: mailbox.uid } });
+        expect(recorded?.syncClients).toEqual({ activesync: { devices: [] }, mapi: { lastSeenAt: expect.any(Number) } });
+        expect((await connect()).status).toBe(200);
+        expect(((await mailboxRepo.findOne({ where: { uid: mailbox.uid } })) as any)?.version).toBe(recorded.version);
+    });
+
     it("Echoes back an empty but well-formed ROP buffer for a valid session.", async () => {
         await createMailbox(owner.uid);
         const connectResult = await connect();

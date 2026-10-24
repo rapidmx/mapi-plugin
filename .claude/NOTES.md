@@ -904,3 +904,8 @@ While rolling the day's restapi 0.25.1 dependency bump out to every plugin, ran 
 
 - `MessageBodyStream.resolveMessageBodyBytes` serves `ENCRYPTED_PLACEHOLDER_TEXT` as `PidTagBody` for a message its sender encrypted (`Message.encrypted`: S/MIME, OpenPGP/MIME or inline OpenPGP). It never parses the ciphertext.
 - This mirrors the zero-access placeholder. Real S/MIME or PGP presentation would need MAPI attachment objects, which this server doesn't implement yet.
+
+### 2026-10-24: Recording Outlook on the mailbox (zero-access per-type defaults)
+- `BaseMapiEmsmdbRoute.recordOutlook()` runs on Connect and sets `Mailbox.syncClients.mapi.lastSeenAt`, at most every 6 h (`OUTLOOK_SEEN_REFRESH_MS`).
+- It is bookkeeping: a failure is logged.
+- restapi treats Outlook as syncing all four types, so they default to off when zero-access is activated (mail stays on once the keys are exported).
