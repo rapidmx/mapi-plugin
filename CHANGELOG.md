@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-24
+
+### Changed
+- Serve an explanation as the body of a zero-access message, which this server can't read
+- Build against @rapidmx/restapi ^0.34.0
+- Describe the zero-access encryption changes in the release notes
+
 ## [1.2.0] - 2026-10-07
 
 ### Changed
@@ -299,7 +306,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 - Removed unused files
 
-[Unreleased]: https://github.com/rapidmx/mapi-plugin/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/rapidmx/mapi-plugin/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/rapidmx/mapi-plugin/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/rapidmx/mapi-plugin/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/rapidmx/mapi-plugin/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/rapidmx/mapi-plugin/compare/v1.0.0...v1.1.0
