@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Jean-Philippe Steinmetz
 // SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
-import { PID_TAG_BODY, resolveMessageBodyBytes, ZERO_ACCESS_PLACEHOLDER_TEXT } from "../../src/rop/MessageBodyStream.js";
+import { ENCRYPTED_PLACEHOLDER_TEXT, PID_TAG_BODY, resolveMessageBodyBytes, ZERO_ACCESS_PLACEHOLDER_TEXT } from "../../src/rop/MessageBodyStream.js";
 import { InMemoryBlobStore } from "../testDoubles.js";
 
 describe("MessageBodyStream Tests", () => {
@@ -49,6 +49,16 @@ describe("MessageBodyStream Tests", () => {
         const bytes = await resolveMessageBodyBytes("message:m3", messageRepo as any, blobStore as any);
 
         expect(bytes).toEqual(Buffer.concat([Buffer.from(ZERO_ACCESS_PLACEHOLDER_TEXT, "utf16le"), Buffer.from([0x00, 0x00])]));
+        expect(blobStore.get).not.toHaveBeenCalled();
+    });
+
+    it("Serves the explanation for a message its sender encrypted end to end, never parsing the ciphertext.", async () => {
+        const blobStore = { get: vi.fn() };
+        const messageRepo = { findOne: vi.fn().mockResolvedValue({ uid: "m4", bodyBlobKey: "bodies/m4", encrypted: true }) };
+
+        const bytes = await resolveMessageBodyBytes("message:m4", messageRepo as any, blobStore as any);
+
+        expect(bytes).toEqual(Buffer.concat([Buffer.from(ENCRYPTED_PLACEHOLDER_TEXT, "utf16le"), Buffer.from([0x00, 0x00])]));
         expect(blobStore.get).not.toHaveBeenCalled();
     });
 });

@@ -899,3 +899,8 @@ While rolling the day's restapi 0.25.1 dependency bump out to every plugin, ran 
 - `resolveMessageBodyBytes` serves `ZERO_ACCESS_PLACEHOLDER_TEXT` for a zero-access message (`Message.zeroAccess`, read structurally because the field is newer than the published restapi) instead of parsing its sealed S/MIME blob.
 - Real S/MIME over MAPI needs attachment objects (`PidTagAttachDataBinary` for `smime.p7m`), which this server does not implement yet.
 - **Not done yet:** `RopSubmitMessageHandler` still files Sent copies in plaintext until it can use restapi's `ZeroAccessWriter` (after a restapi release).
+
+## 2026-10-24 - End-to-end encrypted bodies (OpenPGP interoperability)
+
+- `MessageBodyStream.resolveMessageBodyBytes` serves `ENCRYPTED_PLACEHOLDER_TEXT` as `PidTagBody` for a message its sender encrypted (`Message.encrypted`: S/MIME, OpenPGP/MIME or inline OpenPGP). It never parses the ciphertext.
+- This mirrors the zero-access placeholder. Real S/MIME or PGP presentation would need MAPI attachment objects, which this server doesn't implement yet.

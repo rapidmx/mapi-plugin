@@ -22,6 +22,11 @@ export const PID_TAG_BODY = 0x1000;
 export const ZERO_ACCESS_PLACEHOLDER_TEXT =
     "This message is encrypted. Read it in RapidMX, or in a mail app with your RapidMX encryption keys installed.";
 
+/** The body Outlook shows for a message its sender encrypted end to end (S/MIME, or OpenPGP from Proton Mail and other OpenPGP
+ * apps - @rapidmx/restapi `specs/end-to-end_encryption.md` *OpenPGP Interoperability*): this server can't read it either. */
+export const ENCRYPTED_PLACEHOLDER_TEXT =
+    "This message is end-to-end encrypted. Read it in RapidMX, or in a mail app that has your encryption keys.";
+
 /**
  * Resolves a `"message:<uid>"` target's plain-text body as the exact byte sequence `RopReadStream` must serve
  * for a streamed `PtypString` property - confirmed via `[MS-OXCPRPT]`'s `RopOpenStream` page ("a string of
@@ -48,6 +53,12 @@ export async function resolveMessageBodyBytes(target: string, messageRepo: RepoU
     if ((message as { zeroAccess?: unknown }).zeroAccess) {
         const writer = new BufferWriter();
         writer.writeNullTerminatedUtf16LE(ZERO_ACCESS_PLACEHOLDER_TEXT);
+        return writer.toBuffer();
+    }
+    // Encrypted by its sender: parsing the ciphertext would only give an empty or garbled body.
+    if (message.encrypted) {
+        const writer = new BufferWriter();
+        writer.writeNullTerminatedUtf16LE(ENCRYPTED_PLACEHOLDER_TEXT);
         return writer.toBuffer();
     }
     const raw = await blobStore.get(message.bodyBlobKey);
