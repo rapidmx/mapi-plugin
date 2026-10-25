@@ -25,12 +25,14 @@ import {
     Folder,
     Mailbox,
     newZeroAccessRecordSealer,
+    newZeroAccessWriter,
     RecoverableRepoUtils,
     refreshFolderCounts,
     resolveCallerMailboxUid,
     type BlobStore,
     type FolderCountsContext,
     type ZeroAccessRecordSealer,
+    type ZeroAccessWriter,
 } from "@rapidmx/restapi";
 const { Init, Inject, Logger } = ObjectDecorators;
 const { Auth, Post, Request, Response, User: AuthUser } = RouteDecorators;
@@ -137,6 +139,9 @@ export abstract class BaseMapiEmsmdbRoute<M extends Mailbox> {
     /** The backend's `EncryptionPolicy` model, for sealing what Outlook saves into a calendar zero-access encryption protects. Without
      * it nothing is sealed. */
     protected encryptionPolicyClass?: any;
+    /** The backend's `ZeroAccessIndexEntry` model: with `encryptionPolicyClass`, the Sent Items copy of a message Outlook sends is sealed
+     * when zero-access covers the mailbox's mail. Without it the copy is stored readable. */
+    protected zeroAccessIndexEntryClass?: any;
     protected abstract contactClass: any;
     protected abstract taskClass: any;
     protected abstract labelClass: any;
@@ -156,6 +161,7 @@ export abstract class BaseMapiEmsmdbRoute<M extends Mailbox> {
     private messageRepo?: RepoUtils<any>;
     private calendarEventRepo?: RepoUtils<any>;
     private recordSealer?: ZeroAccessRecordSealer;
+    private zeroAccessWriter?: ZeroAccessWriter;
     private contactRepo?: RepoUtils<any>;
     private taskRepo?: RepoUtils<any>;
     private labelRepo?: RepoUtils<any>;
@@ -215,6 +221,7 @@ export abstract class BaseMapiEmsmdbRoute<M extends Mailbox> {
             });
         }
         this.recordSealer ??= await newZeroAccessRecordSealer(this._objectFactory, this.encryptionPolicyClass);
+        this.zeroAccessWriter ??= await newZeroAccessWriter(this._objectFactory, this.encryptionPolicyClass, this.zeroAccessIndexEntryClass);
         if (!this.contactRepo && this.contactClass) {
             this.contactRepo = await this._objectFactory.newInstance(RecoverableRepoUtils, {
                 name: this.contactClass.name,
@@ -512,6 +519,7 @@ export abstract class BaseMapiEmsmdbRoute<M extends Mailbox> {
             messageRepo: this.messageRepo!,
             calendarEventRepo: this.calendarEventRepo!,
             recordSealer: this.recordSealer,
+            zeroAccessWriter: this.zeroAccessWriter,
             contactRepo: this.contactRepo!,
             taskRepo: this.taskRepo!,
             labelRepo: this.labelRepo!,

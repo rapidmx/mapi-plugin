@@ -14,4 +14,5 @@ export {
     MailboxMongo,
     MessageMongo,
     TaskMongo,
+    ZeroAccessIndexEntryMongo,
 } from "@rapidmx/restapi/mongo";

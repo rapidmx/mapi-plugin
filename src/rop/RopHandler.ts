@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: MPL-2.0
 ///////////////////////////////////////////////////////////////////////////////
 import type { RepoUtils } from "@rapidrest/service-core";
-import type { AuditLogParams, BlobStore, ZeroAccessRecordSealer } from "@rapidmx/restapi";
+import type { AuditLogParams, BlobStore, ZeroAccessRecordSealer, ZeroAccessWriter } from "@rapidmx/restapi";
 import type { ScanPipeline } from "@rapidmx/restapi/scan";
 import type { BufferReader, BufferWriter } from "../codec/BufferCursor.js";
 import type { MapiSessionContext } from "../MapiSessionManager.js";
@@ -50,6 +50,9 @@ export interface RopContext {
     /** Seals what Outlook saves into a calendar zero-access encryption protects (`@rapidmx/restapi`'s `ZeroAccessRecordSealer`). Absent:
      * nothing is sealed. */
     recordSealer?: ZeroAccessRecordSealer;
+    /** Seals the Sent Items copy of a message Outlook sends when zero-access covers the mailbox's mail (`@rapidmx/restapi`'s
+     * `ZeroAccessWriter`). Absent: the copy is stored readable. */
+    zeroAccessWriter?: ZeroAccessWriter;
     contactRepo?: RepoUtils<any>;
     taskRepo?: RepoUtils<any>;
     labelRepo?: RepoUtils<any>;

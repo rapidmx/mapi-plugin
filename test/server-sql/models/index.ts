@@ -2,4 +2,4 @@
 // `test/server-sql`) can discover their `@DataStore` metadata alongside the test routes that use them.
 // Deliberately a NAMED (not wildcard) re-export - see the identical rationale in
 // test/server-mongo/models/index.ts.
-export { CalendarEventSQL, ContactSQL, EncryptionPolicySQL, FolderSQL, LabelSQL, MailboxSQL, MessageSQL, TaskSQL } from "@rapidmx/restapi/sql";
+export { CalendarEventSQL, ContactSQL, EncryptionPolicySQL, FolderSQL, LabelSQL, MailboxSQL, MessageSQL, TaskSQL, ZeroAccessIndexEntrySQL } from "@rapidmx/restapi/sql";

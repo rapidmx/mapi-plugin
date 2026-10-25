@@ -12,6 +12,7 @@ import {
     MailboxMongo,
     MessageMongo,
     TaskMongo,
+    ZeroAccessIndexEntryMongo,
 } from "@rapidmx/restapi/mongo";
 import { BaseMapiEmsmdbRoute } from "../BaseMapiEmsmdbRoute.js";
 import { RopLogonHandler } from "../rop/RopLogonHandler.js";
@@ -53,6 +54,7 @@ export class MapiEmsmdbRouteMongo extends BaseMapiEmsmdbRoute<MailboxMongo> {
     protected messageClass: any = MessageMongo;
     protected calendarEventClass: any = CalendarEventMongo;
     protected encryptionPolicyClass: any = EncryptionPolicyMongo;
+    protected zeroAccessIndexEntryClass: any = ZeroAccessIndexEntryMongo;
     protected contactClass: any = ContactMongo;
     protected taskClass: any = TaskMongo;
     protected labelClass: any = LabelMongo;

@@ -898,7 +898,7 @@ While rolling the day's restapi 0.25.1 dependency bump out to every plugin, ran 
 
 - `resolveMessageBodyBytes` serves `ZERO_ACCESS_PLACEHOLDER_TEXT` for a zero-access message (`Message.zeroAccess`, read structurally because the field is newer than the published restapi) instead of parsing its sealed S/MIME blob.
 - Real S/MIME over MAPI needs attachment objects (`PidTagAttachDataBinary` for `smime.p7m`), which this server does not implement yet.
-- **Not done yet:** `RopSubmitMessageHandler` still files Sent copies in plaintext until it can use restapi's `ZeroAccessWriter` (after a restapi release).
+- `RopSubmitMessageHandler` seals Sent copies with restapi's `ZeroAccessWriter` since the 2026-10-24 review fixes below.
 
 ## 2026-10-24 - End-to-end encrypted bodies (OpenPGP interoperability)
 
@@ -909,3 +909,13 @@ While rolling the day's restapi 0.25.1 dependency bump out to every plugin, ran 
 - `BaseMapiEmsmdbRoute.recordOutlook()` runs on Connect and sets `Mailbox.syncClients.mapi.lastSeenAt`, at most every 6 h (`OUTLOOK_SEEN_REFRESH_MS`).
 - It is bookkeeping: a failure is logged.
 - restapi treats Outlook as syncing all four types, so they default to off when zero-access is activated (mail stays on once the keys are exported).
+
+### 2026-10-24: Review fixes (cross-repo adversarial review)
+- **Sent Items copies sealed.** restapi `specs/search.md` "Every Write" names MAPI submissions.
+  - `BaseMapiEmsmdbRoute` builds a `ZeroAccessWriter` (`newZeroAccessWriter`) from `encryptionPolicyClass` plus the new `zeroAccessIndexEntryClass` (set on `MapiEmsmdbRouteMongo`/`SQL`), and passes it as `RopContext.zeroAccessWriter`.
+  - On an immediate send, `RopSubmitMessageHandler` mints the copy's uid and calls `sealRaw(mailbox, relayed.raw, uid, now)`, unless `relayed.encrypted`.
+  - A sealed copy stores no readable body blob. It gets placeholder `subject`/`bodyPreview` and `zeroAccess`, and no `sanitizedHtmlBlobKey`. The relay scan's sanitized HTML blob is deleted, best effort.
+  - If the row create fails, the sealed blob and index entry are removed, best effort, and the error is rethrown.
+  - The test servers' model indexes export `ZeroAccessIndexEntryMongo`/`SQL`. `test/zeroAccessTestKey.ts` is copied from activesync.
+- **Deliberately left:** the deferred-send ("Do not deliver before") Outbox copy stays readable until relayed. This matches restapi's documented REST scheduled-send behavior, and the backfill also skips Outbox. `ScheduledSendJob` seals the resulting Sent Items copy. The verifier rejected this half of the finding.
+

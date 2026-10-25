@@ -4,6 +4,7 @@
 ///////////////////////////////////////////////////////////////////////////////
 // See the identical file header in test/routes/mongo/MapiEmsmdbRoute.test.ts for the full rationale - this
 // verifies the same BaseMapiEmsmdbRoute transport plumbing on the SQL-backed variant.
+import { testZeroAccessKey } from "../../zeroAccessTestKey.js";
 import config from "../../config.sql.js";
 import { Server, ObjectFactory, ConnectionManager, isSqlDataSource, ACLAction, AccessControlListSQL } from "@rapidrest/service-core";
 import { JWTUtils, Logger } from "@rapidrest/core";
@@ -118,6 +119,9 @@ describe("Route:MapiEmsmdbRouteSQL Tests", () => {
             body.toBuffer(),
         );
     };
+
+    /** The mailbox's messages - the backend's own query shape. */
+    const messagesOf = async (mailboxUid: string): Promise<any[]> => await messageRepo.find({ where: { mailboxUid } });
 
     const blobStore = function (): InMemoryBlobStore {
         return objectFactory.getInstance<InMemoryBlobStore>("BlobStore")!;
@@ -1249,5 +1253,75 @@ describe("Route:MapiEmsmdbRouteSQL Tests", () => {
         secondRopsReader.readUInt32LE();
         secondRopsReader.readUInt16LE();
         expect(secondRopsReader.readUInt16LE()).toBe(id1);
+    });
+
+    describe("Zero-access Sent Items copy (RopSubmitMessage)", () => {
+        /** One ROP request over `cookie`'s session, answering the first ROP's ReturnValue. */
+        const run = async (cookie: string, rops: Buffer): Promise<number> => {
+            const result = await execute(cookie, encodeRopBuffer({ ropsList: rops, handleTable: [0xffffffff, 0xffffffff] }));
+            const reader = new BufferReader(result.body);
+            reader.readBytes(12);
+            return decodeRopBuffer(reader.readBytes(reader.readUInt32LE())).ropsList.readUInt32LE(2);
+        };
+        const logon = (): Buffer => Buffer.from([0xfe, 0, 0, 0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        const createMessage = (folderId: bigint): Buffer => {
+            const writer = new BufferWriter();
+            writer.writeUInt8(0x06);
+            writer.writeUInt8(0); // LogonId
+            writer.writeUInt8(0); // InputHandleIndex
+            writer.writeUInt8(3); // OutputHandleIndex
+            writer.writeUInt16LE(0); // CodePageId
+            writer.writeBigUInt64LE(folderId);
+            writer.writeUInt8(0); // AssociatedFlag
+            return writer.toBuffer();
+        };
+        const setProperties = (values: { propertyId: number; value: string }[]): Buffer => {
+            const valuesWriter = new BufferWriter();
+            for (const { propertyId, value } of values) {
+                writeTaggedPropertyValue(valuesWriter, { propertyId, propertyType: PropertyType.PtypString, value });
+            }
+            const valuesBytes = valuesWriter.toBuffer();
+            const writer = new BufferWriter();
+            writer.writeUInt8(0x0a);
+            writer.writeUInt8(0); // LogonId
+            writer.writeUInt8(3); // InputHandleIndex
+            writer.writeUInt16LE(2 + valuesBytes.length);
+            writer.writeUInt16LE(values.length);
+            writer.writeBytes(valuesBytes);
+            return writer.toBuffer();
+        };
+        const submit = (): Buffer => Buffer.from([0x32, 0, 3, 0]);
+
+        it("Seals the Sent Items copy of a message Outlook sends when zero-access covers the mailbox's mail, storing nothing readable.", async () => {
+            mailTransport().sent = [];
+            const canary = `CANARY-${uuid.v4()}`;
+            const mailbox: any = await createMailbox(owner.uid, { zeroAccessKeys: [await testZeroAccessKey()], zeroAccessTypes: { mail: true } });
+            const cookie = cookieHeaderFrom((await connect()).headers["set-cookie"]);
+
+            await execute(cookie, encodeRopBuffer({ ropsList: logon(), handleTable: [0xffffffff] }));
+            expect(await run(cookie, createMessage(5n))).toBe(0);
+            expect(
+                await run(
+                    cookie,
+                    setProperties([
+                        { propertyId: 0x0037, value: `${canary} subject` },
+                        { propertyId: 0x0e04, value: "recipient@example.com" },
+                        { propertyId: 0x1000, value: `${canary} body` },
+                    ]),
+                ),
+            ).toBe(0);
+            expect(await run(cookie, submit())).toBe(0);
+
+            expect(mailTransport().sent).toHaveLength(1);
+            expect(mailTransport().sent[0].raw.toString("utf-8")).toContain(`${canary} body`);
+            const copies: any[] = await messagesOf(mailbox.uid);
+            expect(copies).toHaveLength(1);
+            expect(copies[0].zeroAccess).toBeTruthy();
+            expect(copies[0].subject).toBe("[...]");
+            expect(copies[0].bodyPreview).toBe("");
+            expect(JSON.stringify(copies[0])).not.toContain(canary);
+            expect(await blobStore().get(copies[0].bodyBlobKey)).toBeTruthy();
+            expect([...(blobStore() as any).store.values()].some((blob: Buffer) => blob.toString("utf-8").includes(canary))).toBe(false);
+        });
     });
 });

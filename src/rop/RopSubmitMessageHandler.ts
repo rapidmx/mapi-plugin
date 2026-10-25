@@ -12,6 +12,7 @@ import {
     RecipientType,
     scanAndRelay,
     type CalendarEvent,
+    type ZeroAccessSealedFields,
 } from "@rapidmx/restapi";
 import type { BufferReader, BufferWriter } from "../codec/BufferCursor.js";
 import type { MapiObjectHandle } from "../MapiSessionManager.js";
@@ -107,6 +108,12 @@ function writeResult(writer: BufferWriter, inputHandleIndex: number, returnValue
  * `Disposition-Notification-To` header (see `util/ReceiptUtils.ts`) and is recorded on the persisted message's
  * own `requestReceipt` field - honored only when the client explicitly sets it, not this mailbox's
  * `alwaysRequestReceiptInternal`/`External` defaults (those apply to the REST/webmail compose path only).
+ *
+ * **Zero-access** (`@rapidmx/restapi` `specs/search.md` §3): when zero-access covers the mailbox's mail, the Sent Items copy of an
+ * immediate send is sealed like delivered mail (`context.zeroAccessWriter.sealRaw()`) - no readable body, subject, preview or sanitized
+ * HTML is stored - unless Outlook already encrypted it end to end. A copy that then fails to save takes its sealed blob and index entry
+ * with it. A deferred message parked in Outbox stays readable until relayed, as restapi's own scheduled send does; `ScheduledSendJob`
+ * seals its Sent Items copy.
  *
  * **Once per draft.** A mail or meeting-response draft is marked `submitted` as soon as a submit gets past the handle
  * check, whatever the outcome, and a submitted draft can't be submitted again (`MAPI_E_INVALID_OBJECT`) or changed by
@@ -258,37 +265,66 @@ export class RopSubmitMessageHandler implements RopHandler {
 
         // The Sent Items copy stores exactly what was relayed: scanAndRelay may have added a Message-ID header, and
         // that header's value (plus the thread it derived) is what recipients' copies carry and what recall targets.
-        await context.blobStore.put(bodyBlobKey, relayed.raw, { contentType: "message/rfc822" });
+        // Sealed for a zero-access mailbox - not when Outlook encrypted it end to end, which is ciphertext already.
+        const uid: string = crypto.randomUUID();
+        const sealed: ZeroAccessSealedFields | undefined = relayed.encrypted ? undefined : await context.zeroAccessWriter?.sealRaw(mailbox, relayed.raw, uid, new Date());
+        if (!sealed) {
+            await context.blobStore.put(bodyBlobKey, relayed.raw, { contentType: "message/rfc822" });
+        }
         const sentFolder = await findOrCreateWellKnownFolder(context.folderRepo, context.folderClass, context.mailboxUid, FolderType.SENT_ITEMS);
-        await context.messageRepo.create(
-            new context.messageClass({
-                folderUid: sentFolder.uid,
-                mailboxUid: context.mailboxUid,
+        try {
+            await this.fileSentCopy(context, uid, sentFolder.uid, sealed, {
                 messageId: relayed.messageId,
                 conversationId: relayed.conversationId,
                 encrypted: relayed.encrypted,
                 subject,
                 from: { address: envelopeFrom, type: RecipientType.TO },
                 recipients,
-                sentDate: new Date(),
-                receivedDate: new Date(),
                 bodyBlobKey,
                 sanitizedHtmlBlobKey: relayed.sanitizedHtmlBlobKey,
                 bodyPreview: bodyText.slice(0, 200),
-                flags: { read: true, flagged: false, answered: false, forwarded: false },
-                importance: MessageImportance.NORMAL,
-                references: [],
-                hasAttachments: false,
                 requestReceipt,
-            }),
-            { ignoreACL: true },
-        );
+            });
+        } catch (err) {
+            if (sealed) {
+                await context.blobStore.delete(sealed.bodyBlobKey).catch(() => undefined);
+                await context.zeroAccessWriter!.removeIndexEntry(sealed.indexEntryUid).catch(() => undefined);
+            }
+            throw err;
+        }
+        if (sealed && relayed.sanitizedHtmlBlobKey) {
+            // Nothing names the relay scan's sanitized HTML any more: it would only be readable content left behind. Best effort.
+            await context.blobStore.delete(relayed.sanitizedHtmlBlobKey).catch(() => undefined);
+        }
         // Adding a message to a folder always bumps its sync key too - see `refreshFolderCounts()`'s own doc comment.
         await context.notifyFolderCounts?.([sentFolder.uid], { bumpSyncKey: true });
 
         writer.writeUInt8(ROP_ID_SUBMIT_MESSAGE);
         writer.writeUInt8(inputHandleIndex);
         writer.writeUInt32LE(0); // ReturnValue - success
+    }
+
+    /** Creates the Sent Items copy `uid` of an immediate send from its readable `fields`, with `sealed`'s in their place when it was
+     * sealed (see this class's doc comment). */
+    private async fileSentCopy(context: RopContext, uid: string, folderUid: string, sealed: ZeroAccessSealedFields | undefined, fields: Record<string, any>): Promise<void> {
+        await context.messageRepo.create(
+            new context.messageClass({
+                ...fields,
+                uid,
+                folderUid,
+                mailboxUid: context.mailboxUid,
+                sentDate: new Date(),
+                receivedDate: new Date(),
+                flags: { read: true, flagged: false, answered: false, forwarded: false },
+                importance: MessageImportance.NORMAL,
+                references: [],
+                hasAttachments: false,
+                ...(sealed
+                    ? { subject: sealed.subject, bodyPreview: sealed.bodyPreview, bodyBlobKey: sealed.bodyBlobKey, zeroAccess: sealed.zeroAccess, sanitizedHtmlBlobKey: undefined }
+                    : {}),
+            }),
+            { ignoreACL: true },
+        );
     }
 
     /**

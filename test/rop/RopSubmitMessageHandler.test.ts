@@ -232,6 +232,72 @@ describe("RopSubmitMessageHandler Tests", () => {
         expect(stored.equals(relayedRaw)).toBe(true);
     });
 
+    describe("Zero-access Sent Items copy", () => {
+        const SEALED = { subject: "[...]", bodyPreview: "", bodyBlobKey: "za/mailbox-1/sealed", zeroAccess: { sealed: true }, indexEntryUid: "index-1" };
+        const draft = (context: RopContext) => {
+            context.session.handles[5] = { type: "message", entityUid: "", draftProperties: { "55": "Secret plans", "3588": "to@example.com", "4096": "The plans." } };
+        };
+        const scanned = (encrypted: boolean) =>
+            ({
+                run: vi.fn().mockResolvedValue({
+                    spam: { verdict: SpamVerdict.CLEAN },
+                    av: { verdict: AvVerdict.CLEAN },
+                    attachments: [],
+                    references: [],
+                    inReplyTo: undefined,
+                    sanitizedHtml: "<p>The plans.</p>",
+                    encrypted,
+                }),
+            }) as any;
+
+        it("Files the sealed copy instead of the readable one, removing the relay scan's sanitized HTML (best effort).", async () => {
+            const writerFake = { sealRaw: vi.fn().mockResolvedValue(SEALED), removeIndexEntry: vi.fn() };
+            const blobStore = new InMemoryBlobStore();
+            const del = vi.spyOn(blobStore, "delete").mockRejectedValue(new Error("store down"));
+            const context = makeContext({ zeroAccessWriter: writerFake as any, scanPipeline: scanned(false), blobStore });
+            draft(context);
+            const writer = new BufferWriter();
+
+            await new RopSubmitMessageHandler().handle(new BufferReader(buildRequest({})), writer, context);
+
+            expect(writer.toBuffer().readUInt32LE(2)).toBe(0);
+            const [savedMessage] = (context.messageRepo as any).create.mock.calls[0];
+            expect(writerFake.sealRaw).toHaveBeenCalledWith(expect.objectContaining({ uid: "mailbox-1" }), expect.any(Buffer), savedMessage.uid, expect.any(Date));
+            expect(savedMessage).toMatchObject({ subject: "[...]", bodyPreview: "", bodyBlobKey: SEALED.bodyBlobKey, zeroAccess: SEALED.zeroAccess });
+            expect(savedMessage.sanitizedHtmlBlobKey).toBeUndefined();
+            expect(JSON.stringify(savedMessage)).not.toContain("plans");
+            expect(del).toHaveBeenCalledWith(expect.stringMatching(/^sanitized\//));
+            // Only the sanitized HTML, whose removal failed, is left: no readable body was stored.
+            expect((blobStore as any).store.size).toBe(1);
+        });
+
+        it("Removes the sealed blob and index entry of a copy that fails to save, and seals nothing Outlook encrypted end to end.", async () => {
+            const writerFake = { sealRaw: vi.fn().mockResolvedValue(SEALED), removeIndexEntry: vi.fn().mockRejectedValue(new Error("db down")) };
+            const blobStore = new InMemoryBlobStore();
+            const del = vi.spyOn(blobStore, "delete").mockRejectedValue(new Error("store down"));
+            const failing = makeContext({
+                zeroAccessWriter: writerFake as any,
+                scanPipeline: scanned(false),
+                blobStore,
+                messageRepo: { create: vi.fn().mockRejectedValue(new Error("insert failed")) } as any,
+            });
+            draft(failing);
+
+            await expect(new RopSubmitMessageHandler().handle(new BufferReader(buildRequest({})), new BufferWriter(), failing)).rejects.toThrow("insert failed");
+            expect(del).toHaveBeenCalledWith(SEALED.bodyBlobKey);
+            expect(writerFake.removeIndexEntry).toHaveBeenCalledWith("index-1");
+
+            const encryptedWriter = { sealRaw: vi.fn(), removeIndexEntry: vi.fn() };
+            const encrypted = makeContext({ zeroAccessWriter: encryptedWriter as any, scanPipeline: scanned(true) });
+            draft(encrypted);
+            await new RopSubmitMessageHandler().handle(new BufferReader(buildRequest({})), new BufferWriter(), encrypted);
+            expect(encryptedWriter.sealRaw).not.toHaveBeenCalled();
+            const [readable] = (encrypted.messageRepo as any).create.mock.calls[0];
+            expect(readable.subject).toBe("Secret plans");
+            expect(readable.sanitizedHtmlBlobKey).toMatch(/^sanitized\//);
+        });
+    });
+
     it.each([
         ["a CR/LF header injection", "to@example.com\r\nBcc: victim@example.com"],
         ["a display name with a malformed address", "Jane <jane@>"],
