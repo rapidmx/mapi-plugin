@@ -7,6 +7,7 @@ import {
     AttendeeResponseStatus,
     AttendeeRole,
     BusyStatus,
+    EVENT_PROTECTED_FIELDS,
     RecipientType,
     type Attendee,
     type CalendarEvent,
@@ -185,6 +186,7 @@ export class RopSaveChangesMessageHandler implements RopHandler {
                     inviteSequenceSent: isInvitePending(existing) ? (existing.inviteSequenceSent ?? null) : sequence,
                 };
                 // A protected calendar's event is sealed; the placeholders Outlook shows and sends back are ignored.
+                dropEmptyEchoes(patch, existing);
                 await context.recordSealer?.sealWrite("calendar", mailbox, patch, existing);
                 await context.calendarEventRepo.update(patch, asEntity(context.calendarEventRepo, existing), { ignoreACL: true });
             }
@@ -217,6 +219,20 @@ export class RopSaveChangesMessageHandler implements RopHandler {
         const created: CalendarEvent & { uid: string } = await context.calendarEventRepo.create(new context.calendarEventClass(fields), { ignoreACL: true });
         handle.entityUid = `calendarEvent:${created.uid}`;
         return BigInt(assignOrGetMid(context.session, handle.entityUid));
+    }
+}
+
+/**
+ * Drops from `patch` a sealed field Outlook sends back as `""` when its placeholder is empty (a location, a description): Outlook is
+ * served `""` for it (`PropertyResolvers`), so `""` is what it was shown, not a clear. restapi's sealer only matches the placeholder
+ * itself (`null`) and would otherwise delete the sealed value - the same rule as activesync's `SyncCommand.sealDeviceWrite()`.
+ */
+export function dropEmptyEchoes(patch: Record<string, any>, existing: { sealedFields?: Record<string, string> | null }): void {
+    for (const field of EVENT_PROTECTED_FIELDS) {
+        const placeholder: unknown = field.placeholder(existing);
+        if (patch[field.name] === "" && existing.sealedFields?.[field.name] !== undefined && (placeholder == null || placeholder === "")) {
+            delete patch[field.name];
+        }
     }
 }
 

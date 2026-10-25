@@ -919,3 +919,8 @@ While rolling the day's restapi 0.25.1 dependency bump out to every plugin, ran 
   - The test servers' model indexes export `ZeroAccessIndexEntryMongo`/`SQL`. `test/zeroAccessTestKey.ts` is copied from activesync.
 - **Deliberately left:** the deferred-send ("Do not deliver before") Outbox copy stays readable until relayed. This matches restapi's documented REST scheduled-send behavior, and the backfill also skips Outbox. `ScheduledSendJob` seals the resulting Sent Items copy. The verifier rejected this half of the finding.
 
+
+### 2026-10-25: Second review fixes
+- **Sealed location kept on an Outlook re-save (#145).** `PropertyResolvers` serves a sealed event's `PidLidLocation` as `""` (its placeholder is `null`). When Outlook wrote that `""` back on a save, `saveAppointment()` passed it to restapi's sealer, which only matches the placeholder itself and so deleted the sealed location for good. `dropEmptyEchoes()` now removes from the update patch a protected calendar field sent as `""` that has a sealed copy and an empty placeholder, before `sealWrite()`. This is the same rule as activesync's `SyncCommand.sealDeviceWrite()` (its #26 fix). A `""` location on an event with no sealed location is still applied as a clear.
+  - Left: whether real Outlook re-sends an untouched `PidLidLocation` is unconfirmed, since Outlook still doesn't get past logon here (see above). The guard costs nothing if it doesn't.
+  - mapi saves no contacts or tasks, so the activesync contact-list refusal (#150) has no counterpart here.

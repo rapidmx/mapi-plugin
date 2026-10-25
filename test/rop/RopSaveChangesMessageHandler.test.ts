@@ -217,6 +217,27 @@ describe("RopSaveChangesMessageHandler Tests", () => {
             expect(calendarEventRepo.update.mock.calls[0][0]).toMatchObject({ title: "Protected event", sealedFields: { title: "sealed" } });
         });
 
+        it("Drops an empty location Outlook sends back for a sealed one, which it was served as empty, before sealing; an empty location with no sealed copy is kept.", async () => {
+            const sealWrite = vi.fn();
+            const start = new Date("2026-09-07T14:00:00.000Z");
+            const sealed = { uid: "evt1", version: 3, title: "Protected event", location: null, startDate: start, endDate: start, attendees: [], sealedFields: { title: "t", location: "l" } };
+            const calendarEventRepo = { findOne: vi.fn().mockResolvedValue(sealed), update: vi.fn() };
+            const context = makeContext({ recordSealer: { sealWrite } as any, calendarEventRepo: calendarEventRepo as any });
+            const locationId = assignNamed(context.session, PSETID_APPOINTMENT, LID_LOCATION);
+            context.session.handles[5] = { type: "message", entityUid: "calendarEvent:evt1", draftProperties: { "26": "IPM.Appointment", [locationId]: "" } };
+            const handler = new RopSaveChangesMessageHandler();
+
+            await handler.handle(new BufferReader(buildRequest({})), new BufferWriter(), context);
+
+            expect(sealWrite.mock.calls[0][2]).not.toHaveProperty("location");
+            expect(sealWrite.mock.calls[0][2].sequence).toBe(0);
+
+            calendarEventRepo.findOne.mockResolvedValue({ ...sealed, location: "Room 1", sealedFields: { title: "t" } });
+            await handler.handle(new BufferReader(buildRequest({})), new BufferWriter(), context);
+
+            expect(sealWrite.mock.calls[1][2].location).toBe("");
+        });
+
         it("Falls back to defaults for fields the client never set on a fresh create.", async () => {
             const context = makeContext();
             const calendarEventRepo = { create: vi.fn().mockResolvedValue({ uid: "evt2" }) };

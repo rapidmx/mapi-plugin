@@ -10,7 +10,7 @@ import { Server, ObjectFactory, ConnectionManager, isSqlDataSource, ACLAction, A
 import { JWTUtils, Logger } from "@rapidrest/core";
 import * as uuid from "uuid";
 import { Repository } from "typeorm";
-import { ContactSQL, FolderSQL, LabelSQL, MailboxSQL, MeetingSchedulingJobSQL, MessageSQL, TaskSQL } from "@rapidmx/restapi/sql";
+import { CalendarEventSQL, ContactSQL, FolderSQL, LabelSQL, MailboxSQL, MeetingSchedulingJobSQL, MessageSQL, TaskSQL } from "@rapidmx/restapi/sql";
 import { FolderType, MessageImportance, RecipientType } from "@rapidmx/restapi";
 import { InMemoryBlobStore, RecordingMailTransport, registerTestDoubles } from "../../testDoubles.js";
 import { cookieHeaderFrom, mapiRequest } from "../../mapiTestClient.js";
@@ -1255,7 +1255,7 @@ describe("Route:MapiEmsmdbRouteSQL Tests", () => {
         expect(secondRopsReader.readUInt16LE()).toBe(id1);
     });
 
-    describe("Zero-access Sent Items copy (RopSubmitMessage)", () => {
+    describe("Zero-access writes (RopSubmitMessage, RopSaveChangesMessage)", () => {
         /** One ROP request over `cookie`'s session, answering the first ROP's ReturnValue. */
         const run = async (cookie: string, rops: Buffer): Promise<number> => {
             const result = await execute(cookie, encodeRopBuffer({ ropsList: rops, handleTable: [0xffffffff, 0xffffffff] }));
@@ -1322,6 +1322,56 @@ describe("Route:MapiEmsmdbRouteSQL Tests", () => {
             expect(JSON.stringify(copies[0])).not.toContain(canary);
             expect(await blobStore().get(copies[0].bodyBlobKey)).toBeTruthy();
             expect([...(blobStore() as any).store.values()].some((blob: Buffer) => blob.toString("utf-8").includes(canary))).toBe(false);
+        });
+
+        it("Keeps a protected appointment's sealed location when Outlook saves it again with the empty location it was shown.", async () => {
+            const canary = `CANARY-${uuid.v4()}`;
+            const mailbox: any = await createMailbox(owner.uid, { zeroAccessKeys: [await testZeroAccessKey()], zeroAccessTypes: { calendar: true } });
+            const cookie = cookieHeaderFrom((await connect()).headers["set-cookie"]);
+            const save = (): Buffer => Buffer.from([0x0c, 0, 1, 3, 0]);
+            const eventsOf = async (): Promise<any[]> => (await (objectFactory.getInstance(ConnectionManager)?.connections.get("sql") as any).getRepository(CalendarEventSQL).find({ where: { mailboxUid: mailbox.uid } })) as any[];
+
+            await execute(cookie, encodeRopBuffer({ ropsList: logon(), handleTable: [0xffffffff] }));
+            // RopGetPropertyIdsFromNames: PidLidLocation's session-scoped ID.
+            const names = new BufferWriter();
+            names.writeUInt8(0x56);
+            names.writeUInt8(0); // LogonId
+            names.writeUInt8(0); // InputHandleIndex
+            names.writeUInt8(0x02); // Flags - assign new IDs
+            names.writeUInt16LE(1);
+            names.writeUInt8(0x00); // Kind - LID
+            names.writeBytes(encodeGuid("00062002-0000-0000-c000-000000000046"));
+            names.writeUInt32LE(0x8208);
+            const namesResult = new BufferReader((await execute(cookie, encodeRopBuffer({ ropsList: names.toBuffer(), handleTable: [0xffffffff] }))).body);
+            namesResult.readBytes(12);
+            const locationId = decodeRopBuffer(namesResult.readBytes(namesResult.readUInt32LE())).ropsList.readUInt16LE(8);
+
+            expect(await run(cookie, createMessage(5n))).toBe(0);
+            expect(
+                await run(
+                    cookie,
+                    setProperties([
+                        { propertyId: 0x001a, value: "IPM.Appointment" },
+                        { propertyId: 0x0037, value: "Checkup" },
+                        { propertyId: locationId, value: `${canary} clinic` },
+                    ]),
+                ),
+            ).toBe(0);
+            expect(await run(cookie, save())).toBe(0);
+            const [created] = await eventsOf();
+            expect(created.title).toBe("Protected event");
+            expect(created.location ?? null).toBeNull();
+            expect(created.sealedFields.location).toEqual(expect.any(String));
+            expect(JSON.stringify(created)).not.toContain(canary);
+
+            // Outlook re-sends the placeholders it was shown: the title, and "" for the location.
+            expect(await run(cookie, setProperties([{ propertyId: 0x0037, value: "Protected event" }, { propertyId: locationId, value: "" }]))).toBe(0);
+            expect(await run(cookie, save())).toBe(0);
+            const events = await eventsOf();
+            expect(events).toHaveLength(1);
+            expect(events[0].sealedFields.location).toBe(created.sealedFields.location);
+            expect(events[0].sealedFields.title).toBe(created.sealedFields.title);
+            expect(events[0].location ?? null).toBeNull();
         });
     });
 });
