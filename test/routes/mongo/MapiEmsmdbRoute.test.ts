@@ -2539,5 +2539,58 @@ describe("Route:MapiEmsmdbRouteMongo Tests", () => {
             expect(events[0].sealedFields.title).toBe(created.sealedFields.title);
             expect(events[0].location ?? null).toBeNull();
         });
+
+        it("Leaves an event made from a zero-access invitation (sealedContent) to its own sealing when Outlook saves it: the placeholders it sends back are kept and a new title or location is refused.", async () => {
+            const mailbox: any = await createMailbox(owner.uid, { zeroAccessKeys: [await testZeroAccessKey()], zeroAccessTypes: { mail: true, calendar: true } });
+            const cookie = cookieHeaderFrom((await connect()).headers["set-cookie"]);
+            const save = (): Buffer => Buffer.from([0x0c, 0, 1, 3, 0]);
+            const repo = () => (objectFactory.getInstance(ConnectionManager)?.connections.get("mongo") as MongoConnection).getMongoRepository("CalendarEventMongo");
+            const eventsOf = async (): Promise<any[]> => await repo().find({ mailboxUid: mailbox.uid }).toArray();
+            const fileAsInvitation = async (fields: Record<string, any>): Promise<void> => {
+                await repo().updateMany({ mailboxUid: mailbox.uid }, { $set: fields });
+            };
+            await execute(cookie, encodeRopBuffer({ ropsList: logon(), handleTable: [0xffffffff] }));
+            // RopGetPropertyIdsFromNames: PidLidLocation's session-scoped ID.
+            const names = new BufferWriter();
+            names.writeUInt8(0x56);
+            names.writeUInt8(0); // LogonId
+            names.writeUInt8(0); // InputHandleIndex
+            names.writeUInt8(0x02); // Flags - assign new IDs
+            names.writeUInt16LE(1);
+            names.writeUInt8(0x00); // Kind - LID
+            names.writeBytes(encodeGuid("00062002-0000-0000-c000-000000000046"));
+            names.writeUInt32LE(0x8208);
+            const namesResult = new BufferReader((await execute(cookie, encodeRopBuffer({ ropsList: names.toBuffer(), handleTable: [0xffffffff] }))).body);
+            namesResult.readBytes(12);
+            const locationId = decodeRopBuffer(namesResult.readBytes(namesResult.readUInt32LE())).ropsList.readUInt16LE(8);
+
+            expect(await run(cookie, createMessage(5n))).toBe(0);
+            expect(await run(cookie, setProperties([{ propertyId: 0x001a, value: "IPM.Appointment" }, { propertyId: 0x0037, value: "Invitation" }]))).toBe(0);
+            expect(await run(cookie, save())).toBe(0);
+            // As ScanQueueJob files an invitation that reached a zero-access mailbox: its content sealed whole, placeholders in the columns.
+            const sealedContent = { keyFingerprint: "fp", sealed: "sealed-content" };
+            await fileAsInvitation({ title: "[...]", location: null, sealedFields: null, sealedContent });
+            const [filed] = await eventsOf();
+
+            // Outlook re-sends the placeholders it was shown: the title, and "" for the location.
+            expect(await run(cookie, setProperties([{ propertyId: 0x0037, value: "[...]" }, { propertyId: locationId, value: "" }]))).toBe(0);
+            expect(await run(cookie, save())).toBe(0);
+            const [kept] = await eventsOf();
+            expect(kept.version).toBeGreaterThan(filed.version);
+            expect(kept.title).toBe("[...]");
+            expect(kept.location ?? null).toBeNull();
+            expect(kept.sealedFields ?? null).toBeNull();
+            expect(kept.sealedContent).toEqual(sealedContent);
+
+            // A new title, or a new location, can't be sealed into sealedContent: refused (MAPI_E_NO_ACCESS), nothing saved.
+            expect(await run(cookie, setProperties([{ propertyId: 0x0037, value: "Q3 review (moved)" }, { propertyId: locationId, value: "" }]))).toBe(0);
+            expect(await run(cookie, save())).toBe(0x80070005);
+            expect(await run(cookie, setProperties([{ propertyId: 0x0037, value: "[...]" }, { propertyId: locationId, value: "Room 9" }]))).toBe(0);
+            expect(await run(cookie, save())).toBe(0x80070005);
+            const [unchanged] = await eventsOf();
+            expect(unchanged.version).toBe(kept.version);
+            expect(unchanged.title).toBe("[...]");
+            expect(unchanged.sealedFields ?? null).toBeNull();
+        });
     });
 });

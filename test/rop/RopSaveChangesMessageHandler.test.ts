@@ -601,5 +601,48 @@ describe("RopSaveChangesMessageHandler Tests", () => {
             expect(response.readUInt32LE()).toBe(0);
             expect(calendarEventRepo.update).not.toHaveBeenCalled();
         });
+
+        it("Leaves an event made from a zero-access invitation (sealedContent) to its own sealing: placeholders are kept, a new title or location is refused with MAPI_E_NO_ACCESS, and nothing is field-sealed.", async () => {
+            const sealWrite = vi.fn();
+            const start = new Date("2026-09-07T14:00:00.000Z");
+            const filed = { uid: "evt1", version: 3, title: "[...]", location: null, startDate: start, endDate: start, attendees: [], sealedContent: { keyFingerprint: "fp", sealed: "s" } };
+            const calendarEventRepo = { findOne: vi.fn().mockResolvedValue(filed), update: vi.fn() };
+            const context = makeContext({ recordSealer: { sealWrite } as any, calendarEventRepo: calendarEventRepo as any });
+            const locationId = assignNamed(context.session, PSETID_APPOINTMENT, LID_LOCATION);
+            const startId = assignNamed(context.session, PSETID_APPOINTMENT, LID_APPOINTMENT_START_WHOLE);
+            const moved = new Date("2026-09-07T16:00:00.000Z").toISOString();
+            const handler = new RopSaveChangesMessageHandler();
+            const save = async (draftProperties: Record<string, string>): Promise<number> => {
+                context.session.handles[5] = { type: "message", entityUid: "calendarEvent:evt1", draftProperties: { "26": "IPM.Appointment", ...draftProperties } };
+                const writer = new BufferWriter();
+                await handler.handle(new BufferReader(buildRequest({})), writer, context);
+                const response = new BufferReader(writer.toBuffer());
+                response.readUInt8();
+                response.readUInt8();
+                return response.readUInt32LE();
+            };
+
+            // A drag to a new time, with no subject, and with the placeholders Outlook was shown.
+            expect(await save({ [startId]: moved })).toBe(0);
+            expect(await save({ "55": "[...]", [locationId]: "", [startId]: moved })).toBe(0);
+            expect(sealWrite).not.toHaveBeenCalled();
+            for (const [patch] of calendarEventRepo.update.mock.calls) {
+                expect(patch).not.toHaveProperty("title");
+                expect(patch).not.toHaveProperty("location");
+                expect(patch).not.toHaveProperty("sealedFields");
+                expect(new Date(patch.startDate).toISOString()).toBe(moved);
+            }
+
+            // The `[...]` title stays a placeholder even on a row whose column was since given another one.
+            calendarEventRepo.findOne.mockResolvedValue({ ...filed, title: "Protected event" });
+            expect(await save({ "55": "[...]" })).toBe(0);
+            calendarEventRepo.findOne.mockResolvedValue(filed);
+
+            calendarEventRepo.update.mockClear();
+            expect(await save({ "55": "Q3 review (moved)" })).toBe(0x80070005);
+            expect(await save({ [locationId]: "Room 9" })).toBe(0x80070005);
+            expect(calendarEventRepo.update).not.toHaveBeenCalled();
+            expect(sealWrite).not.toHaveBeenCalled();
+        });
     });
 });

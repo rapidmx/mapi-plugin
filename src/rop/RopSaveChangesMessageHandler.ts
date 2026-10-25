@@ -8,6 +8,7 @@ import {
     AttendeeRole,
     BusyStatus,
     EVENT_PROTECTED_FIELDS,
+    PROTECTED_SUBJECT,
     RecipientType,
     type Attendee,
     type CalendarEvent,
@@ -44,6 +45,9 @@ const ERROR_INVALID_OBJECT = 0x80070005;
 
 /** `MAPI_E_TOO_BIG`: a meeting with more than `MAX_RECIPIENTS_PER_MESSAGE` attendees. */
 const ERROR_TOO_BIG = 0x80040305;
+
+/** `MAPI_E_NO_ACCESS`: a new title or location for an event whose content is sealed whole with its invitation (`sealedContent`). */
+const ERROR_NO_ACCESS = 0x80070005;
 
 // The same well-known property IDs RopSetPropertiesHandler tracks - duplicated here (rather than imported)
 // since importing them would only save a handful of literals; see that file for the real documentation of what
@@ -112,10 +116,10 @@ export class RopSaveChangesMessageHandler implements RopHandler {
         const mid = messageClass.startsWith(MESSAGE_CLASS_APPOINTMENT_PREFIX)
             ? await this.saveAppointment(handle, draftProperties, context)
             : BigInt(assignOrGetMid(context.session, handle.entityUid !== "" ? handle.entityUid : `draft:${inputHandleIndex}`));
-        if (mid === undefined) {
+        if (typeof mid !== "bigint") {
             writer.writeUInt8(ROP_ID_SAVE_CHANGES_MESSAGE);
             writer.writeUInt8(responseHandleIndex);
-            writer.writeUInt32LE(ERROR_TOO_BIG);
+            writer.writeUInt32LE(mid.error);
             return;
         }
 
@@ -134,13 +138,23 @@ export class RopSaveChangesMessageHandler implements RopHandler {
      * client never set (e.g. no `RopSetProperties` call touched `PidLidBusyStatus`) falls back to the existing
      * row's own value on an update, or the entity class's own default on a fresh create.
      *
-     * Returns `undefined`, saving nothing, for more than `MAX_RECIPIENTS_PER_MESSAGE` attendees: restapi's
+     * Returns `ERROR_TOO_BIG`, saving nothing, for more than `MAX_RECIPIENTS_PER_MESSAGE` attendees: restapi's
      * `MeetingSchedulingJob` mails every attendee of a saved meeting.
+     *
+     * An event made from a zero-access invitation (`sealedContent`) keeps its own sealing, whether or not the calendar is protected, as
+     * restapi's calendar route does (`BaseCalendarEventRoute.keepSealed()`): it is never field-sealed, which would leave the row with two
+     * sealed copies and web-client showing the `sealedContent` one. The `[...]` title and empty location Outlook was shown and sends
+     * back are left as they are; a new title or location is refused (`ERROR_NO_ACCESS`, saving nothing), since resealing
+     * `sealedContent` takes every one of its fields and Outlook was shown none of them.
      */
-    private async saveAppointment(handle: MapiObjectHandle, draftProperties: Record<string, string>, context: RopContext): Promise<bigint | undefined> {
+    private async saveAppointment(
+        handle: MapiObjectHandle,
+        draftProperties: Record<string, string>,
+        context: RopContext,
+    ): Promise<bigint | { error: number }> {
         const decoded = decodeCalendarFieldsFromDraft(context.session, draftProperties);
         if (decoded.attendeeAddresses.length > MAX_RECIPIENTS_PER_MESSAGE) {
-            return undefined;
+            return { error: ERROR_TOO_BIG };
         }
         const attendees: Attendee[] = decoded.attendeeAddresses.map((address) => ({
             address,
@@ -155,6 +169,10 @@ export class RopSaveChangesMessageHandler implements RopHandler {
             const existing: (CalendarEvent & { uid: string; version: number }) | undefined = await context.calendarEventRepo.findOne(uid, {
                 ignoreACL: true,
             });
+            const sealedContent: boolean = !!(existing as any)?.sealedContent;
+            if (existing && sealedContent && editsSealedContent(decoded, existing)) {
+                return { error: ERROR_NO_ACCESS };
+            }
             if (existing) {
                 const updated = {
                     uid: existing.uid,
@@ -185,9 +203,15 @@ export class RopSaveChangesMessageHandler implements RopHandler {
                     // waiting for the job, which then sends the meeting as it now stands rather than not at all.
                     inviteSequenceSent: isInvitePending(existing) ? (existing.inviteSequenceSent ?? null) : sequence,
                 };
-                // A protected calendar's event is sealed; the placeholders Outlook shows and sends back are ignored.
-                dropEmptyEchoes(patch, existing);
-                await context.recordSealer?.sealWrite("calendar", mailbox, patch, existing);
+                if (sealedContent) {
+                    // Only the placeholders are left here (`editsSealedContent()`), and the row keeps its own sealing.
+                    delete patch.title;
+                    delete patch.location;
+                } else {
+                    // A protected calendar's event is sealed; the placeholders Outlook shows and sends back are ignored.
+                    dropEmptyEchoes(patch, existing);
+                    await context.recordSealer?.sealWrite("calendar", mailbox, patch, existing);
+                }
                 await context.calendarEventRepo.update(patch, asEntity(context.calendarEventRepo, existing), { ignoreACL: true });
             }
             return BigInt(assignOrGetMid(context.session, handle.entityUid));
@@ -234,6 +258,15 @@ export function dropEmptyEchoes(patch: Record<string, any>, existing: { sealedFi
             delete patch[field.name];
         }
     }
+}
+
+/**
+ * Whether Outlook's save gives an event whose content is sealed whole with its invitation (`sealedContent`) a new title or location,
+ * rather than the placeholders it was served: the `[...]` title (or the column's own), and `""` for the null location.
+ */
+export function editsSealedContent(decoded: { title?: string; location?: string }, existing: Pick<CalendarEvent, "title" | "location">): boolean {
+    const edits = (value: string | undefined, shown: string | undefined | null): boolean => value !== undefined && value !== "" && value !== (shown ?? "");
+    return (edits(decoded.title, existing.title) && decoded.title !== PROTECTED_SUBJECT) || edits(decoded.location, existing.location);
 }
 
 /**
