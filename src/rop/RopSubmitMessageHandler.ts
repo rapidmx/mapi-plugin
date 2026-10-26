@@ -13,6 +13,7 @@ import {
     scanAndRelay,
     type CalendarEvent,
     type ZeroAccessSealedFields,
+    zeroAccessBlobKey,
 } from "@rapidmx/restapi";
 import type { BufferReader, BufferWriter } from "../codec/BufferCursor.js";
 import type { MapiObjectHandle } from "../MapiSessionManager.js";
@@ -265,12 +266,16 @@ export class RopSubmitMessageHandler implements RopHandler {
 
         // The Sent Items copy stores exactly what was relayed: scanAndRelay may have added a Message-ID header, and
         // that header's value (plus the thread it derived) is what recipients' copies carry and what recall targets.
-        // Sealed for a zero-access mailbox - not when Outlook encrypted it end to end, which is ciphertext already.
+        // Sealed for a zero-access mailbox - not when Outlook encrypted it end to end, which is ciphertext already. The copy's uid is
+        // fresh to this send, so no other filing can share its blob key: named as such (`blobKey`), a seal that fails after storing the
+        // blob removes it rather than leave it for a retry that never comes.
         const uid: string = crypto.randomUUID();
         let sealed: ZeroAccessSealedFields | undefined;
         let sentFolder: any;
         try {
-            sealed = relayed.encrypted ? undefined : await context.zeroAccessWriter?.sealRaw(mailbox, relayed.raw, uid, new Date());
+            sealed = relayed.encrypted
+                ? undefined
+                : await context.zeroAccessWriter?.sealRaw(mailbox, relayed.raw, uid, new Date(), { blobKey: zeroAccessBlobKey(mailbox.uid, uid) });
             if (!sealed) {
                 await context.blobStore.put(bodyBlobKey, relayed.raw, { contentType: "message/rfc822" });
             }

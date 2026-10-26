@@ -7,7 +7,7 @@ import { BufferReader, BufferWriter } from "../../src/codec/BufferCursor.js";
 import { RopSubmitMessageHandler } from "../../src/rop/RopSubmitMessageHandler.js";
 import { handleDataStoreOf, type RopContext } from "../../src/rop/RopHandler.js";
 import { MapiSessionContext } from "../../src/MapiSessionManager.js";
-import { AvVerdict, FolderType, SpamVerdict } from "@rapidmx/restapi";
+import { AvVerdict, FolderType, SpamVerdict, zeroAccessBlobKey } from "@rapidmx/restapi";
 import { ModelUtils } from "@rapidrest/service-core";
 import { InMemoryBlobStore } from "../testDoubles.js";
 import { writeStreamKey } from "../../src/rop/RopWriteStreamHandler.js";
@@ -262,7 +262,10 @@ describe("RopSubmitMessageHandler Tests", () => {
 
             expect(writer.toBuffer().readUInt32LE(2)).toBe(0);
             const [savedMessage] = (context.messageRepo as any).create.mock.calls[0];
-            expect(writerFake.sealRaw).toHaveBeenCalledWith(expect.objectContaining({ uid: "mailbox-1" }), expect.any(Buffer), savedMessage.uid, expect.any(Date));
+            // The copy's uid is fresh to this send, so its blob key is named as one: a seal that fails removes the blob it stored.
+            expect(writerFake.sealRaw).toHaveBeenCalledWith(expect.objectContaining({ uid: "mailbox-1" }), expect.any(Buffer), savedMessage.uid, expect.any(Date), {
+                blobKey: zeroAccessBlobKey("mailbox-1", savedMessage.uid),
+            });
             expect(savedMessage).toMatchObject({ subject: "[...]", bodyPreview: "", bodyBlobKey: SEALED.bodyBlobKey, zeroAccess: SEALED.zeroAccess });
             expect(savedMessage.sanitizedHtmlBlobKey).toBeUndefined();
             expect(JSON.stringify(savedMessage)).not.toContain("plans");

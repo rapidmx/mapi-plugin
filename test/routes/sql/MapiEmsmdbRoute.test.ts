@@ -6,12 +6,12 @@
 // verifies the same BaseMapiEmsmdbRoute transport plumbing on the SQL-backed variant.
 import { testZeroAccessKey } from "../../zeroAccessTestKey.js";
 import config from "../../config.sql.js";
-import { Server, ObjectFactory, ConnectionManager, isSqlDataSource, ACLAction, AccessControlListSQL } from "@rapidrest/service-core";
+import { Server, ObjectFactory, ConnectionManager, isSqlDataSource, ACLAction, AccessControlListSQL, RepoUtils } from "@rapidrest/service-core";
 import { JWTUtils, Logger } from "@rapidrest/core";
 import * as uuid from "uuid";
 import { inspect } from "node:util";
 import { Repository } from "typeorm";
-import { CalendarEventSQL, ContactSQL, FolderSQL, LabelSQL, MailboxSQL, MeetingSchedulingJobSQL, MessageSQL, TaskSQL } from "@rapidmx/restapi/sql";
+import { CalendarEventSQL, ContactSQL, FolderSQL, LabelSQL, MailboxSQL, MeetingSchedulingJobSQL, MessageSQL, TaskSQL, ZeroAccessIndexEntrySQL } from "@rapidmx/restapi/sql";
 import { FolderType, MessageImportance, RecipientType } from "@rapidmx/restapi";
 import { InMemoryBlobStore, RecordingMailTransport, registerTestDoubles } from "../../testDoubles.js";
 import { cookieHeaderFrom, mapiRequest } from "../../mapiTestClient.js";
@@ -1380,6 +1380,47 @@ describe("Route:MapiEmsmdbRouteSQL Tests", () => {
                 route.ropHandlers.delete(0x77);
                 spies.forEach((spy) => spy.mockRestore());
             }
+        });
+
+        it("Leaves no sealed blob, index entry or copy when sealing the Sent Items copy fails writing its index entry.", async () => {
+            mailTransport().sent = [];
+            const canary = `CANARY-${uuid.v4()}`;
+            const mailbox: any = await createMailbox(owner.uid, { zeroAccessKeys: [await testZeroAccessKey()], zeroAccessTypes: { mail: true } });
+            const cookie = cookieHeaderFrom((await connect()).headers["set-cookie"]);
+
+            await execute(cookie, encodeRopBuffer({ ropsList: logon(), handleTable: [0xffffffff] }));
+            expect(await run(cookie, createMessage(5n))).toBe(0);
+            expect(
+                await run(
+                    cookie,
+                    setProperties([
+                        { propertyId: 0x0037, value: `${canary} subject` },
+                        { propertyId: 0x0e04, value: "recipient@example.com" },
+                        { propertyId: 0x1000, value: `${canary} body` },
+                    ]),
+                ),
+            ).toBe(0);
+            const create = RepoUtils.prototype.create;
+            const createSpy = vi.spyOn(RepoUtils.prototype, "create").mockImplementation(async function (this: any, ...args: any[]) {
+                // The index entry sealRaw() writes after storing the sealed blob.
+                if (args[0]?.keyFingerprint && args[0]?.sealed) {
+                    throw new Error("index down");
+                }
+                return await (create as any).apply(this, args);
+            });
+            try {
+                expect(await run(cookie, submit())).not.toBe(0);
+                expect(createSpy.mock.calls.some((call: any[]) => call[0]?.keyFingerprint && call[0]?.sealed)).toBe(true);
+            } finally {
+                createSpy.mockRestore();
+            }
+
+            expect(mailTransport().sent).toHaveLength(1);
+            // The copy's uid was fresh to the send, so restapi's seal() removes the blob it stored under it.
+            expect([...(blobStore() as any).store.keys()].some((key: string) => key.startsWith(`za/${mailbox.uid}/`))).toBe(false);
+            expect([...(blobStore() as any).store.values()].some((blob: Buffer) => blob.toString("utf-8").includes(canary))).toBe(false);
+            expect(await (objectFactory.getInstance(ConnectionManager)!.connections.get("sql") as any).getRepository(ZeroAccessIndexEntrySQL).count({ where: { mailboxUid: mailbox.uid } })).toBe(0);
+            expect((await messagesOf(mailbox.uid)).filter((message: any) => message.zeroAccess)).toHaveLength(0);
         });
 
         it("Keeps a protected appointment's sealed location when Outlook saves it again with the empty location it was shown.", async () => {
