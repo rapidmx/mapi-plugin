@@ -96,4 +96,30 @@ describe("BaseMapiNspiRoute Tests (guard clauses + dispatch fallback only)", () 
 
         await expect(route.dispatch(makeReq("GetMatches"), makeRes(), { uid: "user-1" } as any)).rejects.toThrow(/no resource could be found/i);
     });
+
+    it("dispatch() logs only the request's type, ids and size, never its body or the response's.", async () => {
+        const route = objectFactory.newInstance<TestMapiNspiRoute>(TestMapiNspiRoute, { initialize: false });
+        (route as any).mailboxRepo = {};
+        (route as any).contactRepo = {};
+        const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+        (route as any).logger = logger;
+        const res = makeRes();
+        const send = res.send;
+        const req = makeReq("SomeUnsupportedOperation");
+        req.headers["x-requestid"] = "req-1";
+        req.rawBody = Buffer.from("CANARY-contact", "utf16le");
+
+        await route.dispatch(req, res, { uid: "user-1" } as any);
+        await route.dispatch(makeReq("SomeUnsupportedOperation"), makeRes(), { uid: "user-1" } as any);
+
+        // res.send() is never wrapped to log what goes out.
+        expect(res.send).toBe(send);
+        expect(logger.debug.mock.calls).toEqual([
+            [`NSPI SomeUnsupportedOperation user=user-1 clientInfo= requestId=req-1 bytes=${req.rawBody.length}`],
+            ["NSPI SomeUnsupportedOperation user=user-1 clientInfo= requestId= bytes=0"],
+        ]);
+        expect(logger.info).not.toHaveBeenCalled();
+        expect(logger.warn).not.toHaveBeenCalled();
+        expect(logger.error).not.toHaveBeenCalled();
+    });
 });

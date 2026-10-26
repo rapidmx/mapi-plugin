@@ -9,6 +9,7 @@ import config from "../../config.sql.js";
 import { Server, ObjectFactory, ConnectionManager, isSqlDataSource, ACLAction, AccessControlListSQL } from "@rapidrest/service-core";
 import { JWTUtils, Logger } from "@rapidrest/core";
 import * as uuid from "uuid";
+import { inspect } from "node:util";
 import { Repository } from "typeorm";
 import { CalendarEventSQL, ContactSQL, FolderSQL, LabelSQL, MailboxSQL, MeetingSchedulingJobSQL, MessageSQL, TaskSQL } from "@rapidmx/restapi/sql";
 import { FolderType, MessageImportance, RecipientType } from "@rapidmx/restapi";
@@ -18,6 +19,7 @@ import { BufferReader, BufferWriter } from "../../../src/codec/BufferCursor.js";
 import { decodeGuid, encodeGuid } from "../../../src/codec/MapiGuid.js";
 import { PropertyType, readPropertyValue, writePropertyTag, writeTaggedPropertyValue } from "../../../src/codec/PropertyValue.js";
 import { decodeRopBuffer, encodeRopBuffer } from "../../../src/codec/RopBuffer.js";
+import { MapiEmsmdbRoute } from "../../server-sql/routes/MapiEmsmdbRoute.js";
 
 describe("Route:MapiEmsmdbRouteSQL Tests", () => {
     const logger = Logger();
@@ -1322,6 +1324,62 @@ describe("Route:MapiEmsmdbRouteSQL Tests", () => {
             expect(JSON.stringify(copies[0])).not.toContain(canary);
             expect(await blobStore().get(copies[0].bodyBlobKey)).toBeTruthy();
             expect([...(blobStore() as any).store.values()].some((blob: Buffer) => blob.toString("utf-8").includes(canary))).toBe(false);
+        });
+
+        it("Logs nothing an Outlook write carries: no ROP bytes, request or response body, or session cookie, only sizes and codes.", async () => {
+            mailTransport().sent = [];
+            const canary = `CANARY-${uuid.v4()}`;
+            await createMailbox(owner.uid, { zeroAccessKeys: [await testZeroAccessKey()], zeroAccessTypes: { mail: true } });
+            const route: any = objectFactory.getInstance(MapiEmsmdbRoute);
+            const lines: string[] = [];
+            const record = (...args: any[]): void => {
+                lines.push(args.map((arg) => (typeof arg === "string" ? arg : inspect(arg, { depth: 6, maxArrayLength: null, maxStringLength: null }))).join(" "));
+            };
+            const spies: any[] = [];
+            for (const target of new Set([route.logger, logger, console])) {
+                for (const level of ["error", "warn", "info", "debug", "verbose", "log"]) {
+                    if (typeof target?.[level] === "function") {
+                        spies.push(vi.spyOn(target, level).mockImplementation(record as any));
+                    }
+                }
+            }
+            try {
+                const cookie = cookieHeaderFrom((await connect()).headers["set-cookie"]);
+                await execute(cookie, encodeRopBuffer({ ropsList: logon(), handleTable: [0xffffffff] }));
+                expect(await run(cookie, createMessage(5n))).toBe(0);
+                const subject = setProperties([
+                    { propertyId: 0x0037, value: `${canary} subject` },
+                    { propertyId: 0x0e04, value: "recipient@example.com" },
+                    { propertyId: 0x1000, value: `${canary} body` },
+                ]);
+                expect(await run(cookie, subject)).toBe(0);
+                // A ROP whose handler throws (here a failed query holding what it wrote) is logged by name and message.
+                route.ropHandlers.set(0x77, {
+                    ropId: 0x77,
+                    handle: async (reader: any) => {
+                        reader.readBytes(1 + Buffer.byteLength(canary));
+                        throw Object.assign(new Error("query failed"), { parameters: [`${canary} subject`] });
+                    },
+                });
+                expect(await run(cookie, Buffer.concat([Buffer.from([0x77, 0]), Buffer.from(canary)]))).toBe(0x80004005);
+                expect(await run(cookie, submit())).toBe(0);
+                // An Execute without a session answers a failure code.
+                expect((await execute("", encodeRopBuffer({ ropsList: logon(), handleTable: [0xffffffff] }))).headers["x-responsecode"]).toBe("10");
+
+                const sessionUid: string = /MapiContext=([^;]+)/.exec(cookie)![1];
+                const all: string = lines.join("\n");
+                expect(all).toContain("MAPI Execute IN ropBytes=");
+                expect(all).toContain("MAPI Execute OUT ropBytes=");
+                expect(all).toContain("MAPI Execute failed responseCode=10");
+                expect(all).toContain("RopDispatcher: ROP 0x77 (Object) failed: Error: query failed");
+                for (const secret of [canary, Buffer.from(canary, "utf16le").toString("hex"), Buffer.from(canary).toString("hex"), sessionUid]) {
+                    expect(all).not.toContain(secret);
+                }
+                expect(all).not.toMatch(/Hex=|MAPI_DEBUG/);
+            } finally {
+                route.ropHandlers.delete(0x77);
+                spies.forEach((spy) => spy.mockRestore());
+            }
         });
 
         it("Keeps a protected appointment's sealed location when Outlook saves it again with the empty location it was shown.", async () => {

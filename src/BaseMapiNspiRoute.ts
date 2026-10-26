@@ -51,8 +51,6 @@ export abstract class BaseMapiNspiRoute<M extends Mailbox> {
     private mailboxRepo?: RepoUtils<M>;
     private contactRepo?: RepoUtils<any>;
 
-    // TEMPORARY DIAGNOSTIC LOGGING - see NOTES.md's 2026-09-28 "diagnostic release" entry. Remove once the
-    // Outlook desktop "set of folders cannot be opened" root cause is confirmed.
     @Logger
     private logger: any;
 
@@ -107,45 +105,27 @@ export abstract class BaseMapiNspiRoute<M extends Mailbox> {
         // appended - see the matching comment in BaseMapiEmsmdbRoute.dispatch() for the full reasoning.
         res.setHeader("Set-Cookie", []);
 
-        // TEMPORARY DIAGNOSTIC LOGGING - see the matching comment above. Wraps res.send() to log the exact
-        // outgoing bytes regardless of which case below builds them, and logs the raw incoming body too (the
-        // request body is otherwise never decoded/logged at all for Bind).
-        this.logger?.warn(
-            `MAPI_DEBUG NSPI dispatch requestType=${requestType} user=${user.uid} clientInfo=${clientInfo} requestId=${requestId} rawBodyHex=${req.rawBody ? req.rawBody.toString("hex") : "<empty>"}`,
-        );
-        const originalSend = res.send.bind(res);
-        res.send = (body?: any): any => {
-            this.logger?.warn(`MAPI_DEBUG NSPI ${requestType} OUT responseHex=${Buffer.isBuffer(body) ? body.toString("hex") : String(body)}`);
-            return originalSend(body);
-        };
-        try {
-            switch (requestType) {
-                case "Bind":
-                    await handleNspiBind(res, user, this.mailboxRepo);
-                    this.logger?.warn(`MAPI_DEBUG NSPI Bind OK user=${user.uid}`);
-                    return;
-                case "Unbind":
-                    handleNspiUnbind(res);
-                    return;
-                case "GetMatches": {
-                    const mailboxUid = await resolveCallerMailboxUid(this.mailboxRepo, user);
-                    if (!mailboxUid) {
-                        throw new ApiError(ApiErrors.NOT_FOUND, 404, ApiErrorMessages.NOT_FOUND);
-                    }
-                    await handleNspiGetMatches(req, res, mailboxUid, this.contactRepo);
-                    this.logger?.warn(`MAPI_DEBUG NSPI GetMatches OK mailboxUid=${mailboxUid}`);
-                    return;
+        // Sizes and ids only: a request or response body names the address book entries looked up (contact names
+        // and addresses), so neither is ever logged.
+        this.logger?.debug?.(`NSPI ${requestType} user=${user.uid} clientInfo=${clientInfo} requestId=${requestId} bytes=${req.rawBody?.length ?? 0}`);
+        switch (requestType) {
+            case "Bind":
+                await handleNspiBind(res, user, this.mailboxRepo);
+                return;
+            case "Unbind":
+                handleNspiUnbind(res);
+                return;
+            case "GetMatches": {
+                const mailboxUid = await resolveCallerMailboxUid(this.mailboxRepo, user);
+                if (!mailboxUid) {
+                    throw new ApiError(ApiErrors.NOT_FOUND, 404, ApiErrorMessages.NOT_FOUND);
                 }
-                default:
-                    this.logger?.warn(`MAPI_DEBUG NSPI unrecognized requestType=${requestType}, answering 501`);
-                    res.status(501).send();
-                    return;
+                await handleNspiGetMatches(req, res, mailboxUid, this.contactRepo);
+                return;
             }
-        } catch (err) {
-            // TEMPORARY DIAGNOSTIC LOGGING - the real error here would otherwise only ever surface as a generic
-            // 500/ApiError with no server-side trace of why.
-            this.logger?.warn(`MAPI_DEBUG NSPI ${requestType} threw:`, err);
-            throw err;
+            default:
+                res.status(501).send();
+                return;
         }
     }
 }

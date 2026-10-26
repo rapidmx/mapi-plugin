@@ -133,11 +133,11 @@ export async function dispatchRops(
                 if (err instanceof DecodeError) {
                     throw err;
                 }
-                // TEMPORARY DIAGNOSTIC LOGGING - see NOTES.md's 2026-09-28 "diagnostic release" entry. A ROP
-                // handler's real error is otherwise completely swallowed - the client only ever sees a bare
-                // MAPI_E_CALL_FAILED/MAPI_E_TOO_COMPLEX, with nothing server-side recording why. Remove once the
-                // Outlook desktop "set of folders cannot be opened" root cause is confirmed.
-                console.error(`MAPI_DEBUG ROP 0x${ropId.toString(16)} (${handler.constructor.name}) threw:`, err);
+                // The client only sees MAPI_E_CALL_FAILED/MAPI_E_TOO_COMPLEX, so the cause is logged here: the ROP, its
+                // handler and the error's name and message only. Never the error object or the ROP's bytes, whose
+                // fields (a failed query's parameters, the properties being set) can carry the message's content.
+                const error: any = err;
+                console.warn(`RopDispatcher: ROP 0x${ropId.toString(16)} (${handler.constructor.name}) failed: ${error?.name ?? "Error"}: ${error?.message ?? error}`);
                 response = failureResponse(handler, ropsList, start, err instanceof WorkBudgetExceededError ? ERROR_TOO_COMPLEX : ERROR_CALL_FAILED);
             }
 

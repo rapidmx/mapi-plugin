@@ -127,6 +127,33 @@ describe("RopDispatcher Tests", () => {
         expect(response.length).toBeLessThanOrEqual(20);
     });
 
+    it("Logs a failing ROP's id, handler and error message, never the error object or the ROP's bytes.", async () => {
+        const canary = "CANARY-subject";
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+        const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+        try {
+            const failure: any = new Error("constraint failed");
+            failure.parameters = [canary];
+            const bare: any = "a bare string"; // a thrown non-Error
+            const handlers = new Map<number, RopHandler>([
+                [0x0a, { ropId: 0x0a, handle: (reader) => { reader.readBytes(2 + canary.length); throw failure; } }],
+                [0x0b, { ropId: 0x0b, handle: (reader) => { reader.readUInt8(); reader.readUInt8(); throw bare; } }],
+            ]);
+
+            await dispatchRops(Buffer.concat([Buffer.from([0x0a, 0x00, 0x00]), Buffer.from(canary), Buffer.from([0x0b, 0x00, 0x00])]), handlers, makeContext());
+
+            expect(error).not.toHaveBeenCalled();
+            expect(warn.mock.calls).toEqual([
+                ["RopDispatcher: ROP 0xa (Object) failed: Error: constraint failed"],
+                ["RopDispatcher: ROP 0xb (Object) failed: Error: a bare string"],
+            ]);
+            expect(JSON.stringify(warn.mock.calls)).not.toContain(canary);
+        } finally {
+            warn.mockRestore();
+            error.mockRestore();
+        }
+    });
+
     it("Returns an empty buffer for an empty ropsList.", async () => {
         const response = await dispatchRops(Buffer.alloc(0), new Map(), makeContext());
         expect(response.length).toBe(0);

@@ -16,6 +16,7 @@ import config from "../../config.js";
 import { MongoConnection, MongoRepository, Server, ObjectFactory, ConnectionManager, ACLAction } from "@rapidrest/service-core";
 import { JWTUtils, Logger } from "@rapidrest/core";
 import * as uuid from "uuid";
+import { inspect } from "node:util";
 import { ContactMongo, FolderMongo, LabelMongo, MailboxMongo, MeetingSchedulingJobMongo, MessageMongo, TaskMongo } from "@rapidmx/restapi/mongo";
 import { FolderType, MessageImportance, RecipientType } from "@rapidmx/restapi";
 import { MongoMemoryServer } from "mongodb-memory-server";
@@ -819,6 +820,100 @@ describe("Route:MapiEmsmdbRouteMongo Tests", () => {
                 expect(result.body.readUInt32LE(12)).toBe(0); // no RopBuffer
             } finally {
                 save.mockRestore();
+            }
+        });
+    });
+
+    describe("Logging", () => {
+        /** One ROP request over `cookie`'s session, answering the first ROP's ReturnValue. */
+        const run = async (cookie: string, rops: Buffer): Promise<number> => {
+            const result = await execute(cookie, encodeRopBuffer({ ropsList: rops, handleTable: [0xffffffff, 0xffffffff] }));
+            const reader = new BufferReader(result.body);
+            reader.readBytes(12);
+            return decodeRopBuffer(reader.readBytes(reader.readUInt32LE())).ropsList.readUInt32LE(2);
+        };
+        const logon = (): Buffer => Buffer.from([0xfe, 0, 0, 0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        const createMessage = (folderId: bigint): Buffer => {
+            const writer = new BufferWriter();
+            writer.writeUInt8(0x06);
+            writer.writeUInt8(0); // LogonId
+            writer.writeUInt8(0); // InputHandleIndex
+            writer.writeUInt8(3); // OutputHandleIndex
+            writer.writeUInt16LE(0); // CodePageId
+            writer.writeBigUInt64LE(folderId);
+            writer.writeUInt8(0); // AssociatedFlag
+            return writer.toBuffer();
+        };
+        const setProperties = (values: { propertyId: number; value: string }[]): Buffer => {
+            const valuesWriter = new BufferWriter();
+            for (const { propertyId, value } of values) {
+                writeTaggedPropertyValue(valuesWriter, { propertyId, propertyType: PropertyType.PtypString, value });
+            }
+            const valuesBytes = valuesWriter.toBuffer();
+            const writer = new BufferWriter();
+            writer.writeUInt8(0x0a);
+            writer.writeUInt8(0); // LogonId
+            writer.writeUInt8(3); // InputHandleIndex
+            writer.writeUInt16LE(2 + valuesBytes.length);
+            writer.writeUInt16LE(values.length);
+            writer.writeBytes(valuesBytes);
+            return writer.toBuffer();
+        };
+        const submit = (): Buffer => Buffer.from([0x32, 0, 3, 0]);
+
+        it("Logs nothing an Outlook write carries: no ROP bytes, request or response body, or session cookie, only sizes and codes.", async () => {
+            mailTransport().sent = [];
+            const canary = `CANARY-${uuid.v4()}`;
+            await createMailbox(owner.uid, { zeroAccessKeys: [await testZeroAccessKey()], zeroAccessTypes: { mail: true } });
+            const route: any = objectFactory.getInstance(MapiEmsmdbRoute);
+            const lines: string[] = [];
+            const record = (...args: any[]): void => {
+                lines.push(args.map((arg) => (typeof arg === "string" ? arg : inspect(arg, { depth: 6, maxArrayLength: null, maxStringLength: null }))).join(" "));
+            };
+            const spies: any[] = [];
+            for (const target of new Set([route.logger, logger, console])) {
+                for (const level of ["error", "warn", "info", "debug", "verbose", "log"]) {
+                    if (typeof target?.[level] === "function") {
+                        spies.push(vi.spyOn(target, level).mockImplementation(record as any));
+                    }
+                }
+            }
+            try {
+                const cookie = cookieHeaderFrom((await connect()).headers["set-cookie"]);
+                await execute(cookie, encodeRopBuffer({ ropsList: logon(), handleTable: [0xffffffff] }));
+                expect(await run(cookie, createMessage(5n))).toBe(0);
+                const subject = setProperties([
+                    { propertyId: 0x0037, value: `${canary} subject` },
+                    { propertyId: 0x0e04, value: "recipient@example.com" },
+                    { propertyId: 0x1000, value: `${canary} body` },
+                ]);
+                expect(await run(cookie, subject)).toBe(0);
+                // A ROP whose handler throws (here a failed query holding what it wrote) is logged by name and message.
+                route.ropHandlers.set(0x77, {
+                    ropId: 0x77,
+                    handle: async (reader: any) => {
+                        reader.readBytes(1 + Buffer.byteLength(canary));
+                        throw Object.assign(new Error("query failed"), { parameters: [`${canary} subject`] });
+                    },
+                });
+                expect(await run(cookie, Buffer.concat([Buffer.from([0x77, 0]), Buffer.from(canary)]))).toBe(0x80004005);
+                expect(await run(cookie, submit())).toBe(0);
+                // An Execute without a session answers a failure code.
+                expect((await execute("", encodeRopBuffer({ ropsList: logon(), handleTable: [0xffffffff] }))).headers["x-responsecode"]).toBe("10");
+
+                const sessionUid: string = /MapiContext=([^;]+)/.exec(cookie)![1];
+                const all: string = lines.join("\n");
+                expect(all).toContain("MAPI Execute IN ropBytes=");
+                expect(all).toContain("MAPI Execute OUT ropBytes=");
+                expect(all).toContain("MAPI Execute failed responseCode=10");
+                expect(all).toContain("RopDispatcher: ROP 0x77 (Object) failed: Error: query failed");
+                for (const secret of [canary, Buffer.from(canary, "utf16le").toString("hex"), Buffer.from(canary).toString("hex"), sessionUid]) {
+                    expect(all).not.toContain(secret);
+                }
+                expect(all).not.toMatch(/Hex=|MAPI_DEBUG/);
+            } finally {
+                route.ropHandlers.delete(0x77);
+                spies.forEach((spy) => spy.mockRestore());
             }
         });
     });

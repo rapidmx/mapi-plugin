@@ -294,11 +294,9 @@ export abstract class BaseMapiEmsmdbRoute<M extends Mailbox> {
         const clientInfo: string = firstHeader(req, "x-clientinfo") ?? "";
         const requestId: string = firstHeader(req, "x-requestid") ?? "";
 
-        // TEMPORARY DIAGNOSTIC LOGGING - see NOTES.md's 2026-09-28 "diagnostic release" entry. Remove once the
-        // Outlook desktop "set of folders cannot be opened" root cause is confirmed.
-        this.logger?.warn(
-            `MAPI_DEBUG dispatch requestType=${requestType} user=${user.uid} sessionCookie=${req.cookies["MapiContext"] ?? "<none>"} clientInfo=${clientInfo} requestId=${requestId}`,
-        );
+        // Sizes and ids only: a request or response body carries message content (the plaintext of what a zero-access
+        // mailbox seals), and the MapiContext cookie names the session, so neither is ever logged.
+        this.logger?.debug?.(`MAPI ${requestType} user=${user.uid} clientInfo=${clientInfo} requestId=${requestId} bytes=${req.rawBody?.length ?? 0}`);
 
         res.setHeader("Content-Type", "application/mapi-http")
             .setHeader("X-RequestType", requestType ?? "")
@@ -364,11 +362,6 @@ export abstract class BaseMapiEmsmdbRoute<M extends Mailbox> {
     }
 
     private async handleConnect(req: HttpRequest, res: HttpResponse, user: JWTUser): Promise<void> {
-        // TEMPORARY DIAGNOSTIC LOGGING - see the matching comment in dispatch(). The request body is never
-        // decoded (see this method's own doc comment on why), but real Outlook sends a real UserDn/Flags/
-        // CodePageId/CpidString/LcidString/LcidSort/AuxiliaryBuffer here - worth seeing the raw bytes in case
-        // something in it should actually change how this responds.
-        this.logger?.warn(`MAPI_DEBUG Connect IN rawBodyHex=${req.rawBody ? req.rawBody.toString("hex") : "<empty>"}`);
         const mailboxUid: string | undefined = await resolveCallerMailboxUid(this.mailboxRepo!, user);
         if (!mailboxUid) {
             throw new ApiError(ApiErrors.NOT_FOUND, 404, ApiErrorMessages.NOT_FOUND);
@@ -377,8 +370,6 @@ export abstract class BaseMapiEmsmdbRoute<M extends Mailbox> {
         await this.recordOutlook(mailbox);
 
         const session: MapiSessionContext = await this.sessionManager!.create(mailboxUid, user.uid);
-        // TEMPORARY DIAGNOSTIC LOGGING - see the matching comment in dispatch().
-        this.logger?.warn(`MAPI_DEBUG Connect OK mailboxUid=${mailboxUid} sessionUid=${session.uid}`);
         // Real Exchange's Set-Cookie always carries Path/Secure/SameSite=None/HttpOnly - confirmed from a real
         // Outlook-to-Exchange-Online capture (see NOTES.md's dated entry). A bare `name=value` cookie (this
         // route's own previous behavior) is never sent back by Outlook on any later request - decorating it to
@@ -398,12 +389,7 @@ export abstract class BaseMapiEmsmdbRoute<M extends Mailbox> {
         body.writeNullTerminatedString8("/");
         body.writeNullTerminatedUtf16LE(mailbox?.displayName ?? "");
         body.writeUInt32LE(0); // AuxiliaryBufferSize
-        const connectResponseBody: Buffer = body.toBuffer();
-        // TEMPORARY DIAGNOSTIC LOGGING - see the matching comment in dispatch().
-        this.logger?.warn(
-            `MAPI_DEBUG Connect OUT responseHex=${connectResponseBody.toString("hex")} setCookieHeaders=MapiContext=${session.uid},MapiSequence=0`,
-        );
-        res.status(200).send(connectResponseBody);
+        res.status(200).send(body.toBuffer());
     }
 
     /**
@@ -508,8 +494,7 @@ export abstract class BaseMapiEmsmdbRoute<M extends Mailbox> {
         await this.sessionManager!.touch(session).catch(() => undefined);
 
         const { ropsList, handleTable, maxRopOut } = decodeExecuteRequest(req.rawBody ?? Buffer.alloc(0));
-        // TEMPORARY DIAGNOSTIC LOGGING - see the matching comment in dispatch().
-        this.logger?.warn(`MAPI_DEBUG Execute IN ropsListHex=${ropsList.toString("hex")} maxRopOut=${maxRopOut} handleTableLen=${handleTable.length}`);
+        this.logger?.debug?.(`MAPI Execute IN ropBytes=${ropsList.length} maxRopOut=${maxRopOut} handles=${handleTable.length}`);
         const context: RopContext = {
             mailboxUid: session.mailboxUid,
             userUid: session.userUid,
@@ -551,10 +536,11 @@ export abstract class BaseMapiEmsmdbRoute<M extends Mailbox> {
             await Promise.all(released.map((key) => store.delete(key, owners).catch(() => undefined)));
         }
         if (!Buffer.isBuffer(dispatched) && !(dispatched.error instanceof ExecuteBufferTooSmallError)) {
-            // TEMPORARY DIAGNOSTIC LOGGING - see the matching comment in dispatch(). dispatchRops() only rejects
-            // like this for something it can't attribute to one ROP (a malformed request, or a context-setup
-            // throw) - otherwise-silent past this point (400 or a generic 500).
-            this.logger?.warn(`MAPI_DEBUG dispatchRops rejected:`, dispatched.error);
+            // dispatchRops() only rejects like this for something it can't attribute to one ROP (a malformed request,
+            // or a context-setup throw). Only the error's name and message are logged, never the error object, whose
+            // other fields (a failed query's parameters) can carry what the request wrote.
+            const error: any = dispatched.error;
+            this.logger?.warn(`BaseMapiEmsmdbRoute: Execute rejected: ${error?.name ?? "Error"}: ${error?.message ?? error}`);
             throw dispatched.error instanceof DecodeError ? new ApiError(ApiErrors.INVALID_REQUEST, 400, ApiErrorMessages.INVALID_REQUEST) : dispatched.error;
         }
         if (saved !== "saved") {
@@ -576,8 +562,7 @@ export abstract class BaseMapiEmsmdbRoute<M extends Mailbox> {
             return;
         }
         const responseRopsList: Buffer = dispatched;
-        // TEMPORARY DIAGNOSTIC LOGGING - see the matching comment in dispatch().
-        this.logger?.warn(`MAPI_DEBUG Execute OUT responseRopsListHex=${responseRopsList.toString("hex")}`);
+        this.logger?.debug?.(`MAPI Execute OUT ropBytes=${responseRopsList.length}`);
 
         const responseRopBuffer: Buffer = encodeRopBuffer({ ropsList: responseRopsList, handleTable });
         const body = new BufferWriter();
@@ -610,8 +595,7 @@ export abstract class BaseMapiEmsmdbRoute<M extends Mailbox> {
 
     /** Writes an `Execute` failure body (no ROP buffer) with the given `X-ResponseCode` and `ErrorCode`. */
     private sendExecuteFailure(res: HttpResponse, responseCode: number, errorCode: number): void {
-        // TEMPORARY DIAGNOSTIC LOGGING - see the matching comment in dispatch().
-        this.logger?.warn(`MAPI_DEBUG sendExecuteFailure responseCode=${responseCode} errorCode=0x${errorCode.toString(16)}`);
+        this.logger?.debug?.(`MAPI Execute failed responseCode=${responseCode} errorCode=0x${errorCode.toString(16)}`);
         res.setHeader("X-ResponseCode", String(responseCode));
         const body = new BufferWriter();
         body.writeUInt32LE(0); // StatusCode
