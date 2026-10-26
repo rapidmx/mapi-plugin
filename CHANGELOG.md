@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-10-26
+
+### Changed
+- Explain, instead of parsing the ciphertext into an empty body, a message its sender encrypted end to end (S/MIME or OpenPGP) in PidTagBody
+- Record on the mailbox that Outlook syncs it, at most every six hours, for restapi's zero-access defaults and warnings
+- Seal the appointments Outlook saves into a calendar zero-access encryption protects
+- Log only request types, ids, body sizes, ROP byte counts and response codes at debug level for Emsmdb and NSPI requests
+- Log a ROP handler's failure by its ROP id, handler name and error name and message only, never the error object or the ROP's bytes
+- Name a Sent Items copy's fresh za/<mailbox>/<uid> key as fresh to its sealRaw() call, so a seal that fails writing its index entry removes the sealed blob it stored rather than leave it with no row naming it
+- Force the fixed versions of the dependencies the audit flags through resolutions, and ignore only node-forge's unfixed advisory 1240912 until acme-client or node-forge ships a fix
+- Pass restapi's freshMessageUid to the Sent Items copy's sealRaw() in place of naming its fresh za/<mailbox>/<uid> key as blobKey, so a seal that fails after storing the blob removes it under the option made for a uid minted for one filing
+- Describe this release's changes in the release notes
+- Build against @rapidmx/restapi ^0.35.0
+
+### Fixed
+- Fixed the Sent Items copy of a message Outlook sends being stored readable for a zero-access mailbox, sealing it with restapi's ZeroAccessWriter
+- Fixed Outlook re-saving a protected appointment with the empty location it was shown deleting the sealed location, by dropping that empty echo before sealing
+- Fixed every Outlook save of an event made from a zero-access invitation sealing its [...] placeholder title into sealedFields, by leaving such an event to its own sealing and refusing a new title or location with MAPI_E_NO_ACCESS
+
+### Removed
+- Removed the relay scan's sanitized HTML of a sealed Sent Items copy, and the sealed blob and index entry of a copy that fails to save
+- Removed the temporary MAPI_DEBUG logging, which wrote every Execute request and response ROP buffer, the Connect and NSPI bodies and the MapiContext session cookie to the log, so the plaintext Outlook sends for a zero-access mailbox never reaches it
+- Removed the body blob, a sealed copy's index entry and the relay scan's readable sanitized HTML when an Outlook send's Sent Items copy fails to be sealed, find its folder or be saved
+
 ## [1.3.0] - 2026-10-24
 
 ### Changed
@@ -306,7 +330,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 - Removed unused files
 
-[Unreleased]: https://github.com/rapidmx/mapi-plugin/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/rapidmx/mapi-plugin/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/rapidmx/mapi-plugin/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/rapidmx/mapi-plugin/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/rapidmx/mapi-plugin/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/rapidmx/mapi-plugin/compare/v1.1.0...v1.1.1

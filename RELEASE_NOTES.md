@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v1.4.0
+
 ### Added
 
 - **Zero-access encryption for calendars** (`@rapidmx/restapi` 0.35). When zero-access encryption protects a mailbox's calendar, appointments saved from Outlook have their title, location and description sealed, as web-client and ActiveSync saves are. Outlook can't open sealed fields, so it shows their placeholders. mapi doesn't save contacts or tasks, so the new contact and task protection doesn't apply here.
