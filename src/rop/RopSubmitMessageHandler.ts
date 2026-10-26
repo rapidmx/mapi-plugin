@@ -111,8 +111,8 @@ function writeResult(writer: BufferWriter, inputHandleIndex: number, returnValue
  *
  * **Zero-access** (`@rapidmx/restapi` `specs/search.md` §3): when zero-access covers the mailbox's mail, the Sent Items copy of an
  * immediate send is sealed like delivered mail (`context.zeroAccessWriter.sealRaw()`) - no readable body, subject, preview or sanitized
- * HTML is stored - unless Outlook already encrypted it end to end. A copy that then fails to save takes its sealed blob and index entry
- * with it. A deferred message parked in Outbox stays readable until relayed, as restapi's own scheduled send does; `ScheduledSendJob`
+ * HTML is stored - unless Outlook already encrypted it end to end. A copy that fails to be sealed or saved takes its body blob, a sealed
+ * copy's index entry and the relay scan's sanitized HTML with it. A deferred message parked in Outbox stays readable until relayed, as restapi's own scheduled send does; `ScheduledSendJob`
  * seals its Sent Items copy.
  *
  * **Once per draft.** A mail or meeting-response draft is marked `submitted` as soon as a submit gets past the handle
@@ -267,12 +267,14 @@ export class RopSubmitMessageHandler implements RopHandler {
         // that header's value (plus the thread it derived) is what recipients' copies carry and what recall targets.
         // Sealed for a zero-access mailbox - not when Outlook encrypted it end to end, which is ciphertext already.
         const uid: string = crypto.randomUUID();
-        const sealed: ZeroAccessSealedFields | undefined = relayed.encrypted ? undefined : await context.zeroAccessWriter?.sealRaw(mailbox, relayed.raw, uid, new Date());
-        if (!sealed) {
-            await context.blobStore.put(bodyBlobKey, relayed.raw, { contentType: "message/rfc822" });
-        }
-        const sentFolder = await findOrCreateWellKnownFolder(context.folderRepo, context.folderClass, context.mailboxUid, FolderType.SENT_ITEMS);
+        let sealed: ZeroAccessSealedFields | undefined;
+        let sentFolder: any;
         try {
+            sealed = relayed.encrypted ? undefined : await context.zeroAccessWriter?.sealRaw(mailbox, relayed.raw, uid, new Date());
+            if (!sealed) {
+                await context.blobStore.put(bodyBlobKey, relayed.raw, { contentType: "message/rfc822" });
+            }
+            sentFolder = await findOrCreateWellKnownFolder(context.folderRepo, context.folderClass, context.mailboxUid, FolderType.SENT_ITEMS);
             await this.fileSentCopy(context, uid, sentFolder.uid, sealed, {
                 messageId: relayed.messageId,
                 conversationId: relayed.conversationId,
@@ -286,9 +288,14 @@ export class RopSubmitMessageHandler implements RopHandler {
                 requestReceipt,
             });
         } catch (err) {
+            // Nothing names what this copy stored: its body (sealed or readable), a sealed copy's index entry, which would be a search hit
+            // for a message that doesn't exist, and the relay scan's readable sanitized HTML. Best effort.
+            await context.blobStore.delete(sealed ? sealed.bodyBlobKey : bodyBlobKey).catch(() => undefined);
             if (sealed) {
-                await context.blobStore.delete(sealed.bodyBlobKey).catch(() => undefined);
                 await context.zeroAccessWriter!.removeIndexEntry(sealed.indexEntryUid).catch(() => undefined);
+            }
+            if (relayed.sanitizedHtmlBlobKey) {
+                await context.blobStore.delete(relayed.sanitizedHtmlBlobKey).catch(() => undefined);
             }
             throw err;
         }

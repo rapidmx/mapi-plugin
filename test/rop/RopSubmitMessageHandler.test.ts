@@ -286,6 +286,8 @@ describe("RopSubmitMessageHandler Tests", () => {
             await expect(new RopSubmitMessageHandler().handle(new BufferReader(buildRequest({})), new BufferWriter(), failing)).rejects.toThrow("insert failed");
             expect(del).toHaveBeenCalledWith(SEALED.bodyBlobKey);
             expect(writerFake.removeIndexEntry).toHaveBeenCalledWith("index-1");
+            // The relay scan's readable sanitized HTML goes too: no copy names it.
+            expect(del).toHaveBeenCalledWith(expect.stringMatching(/^sanitized\//));
 
             const encryptedWriter = { sealRaw: vi.fn(), removeIndexEntry: vi.fn() };
             const encrypted = makeContext({ zeroAccessWriter: encryptedWriter as any, scanPipeline: scanned(true) });
@@ -295,6 +297,49 @@ describe("RopSubmitMessageHandler Tests", () => {
             const [readable] = (encrypted.messageRepo as any).create.mock.calls[0];
             expect(readable.subject).toBe("Secret plans");
             expect(readable.sanitizedHtmlBlobKey).toMatch(/^sanitized\//);
+        });
+
+        it("Removes the sealed blob, its index entry and the sanitized HTML when the Sent Items folder can't be found or created.", async () => {
+            const writerFake = { sealRaw: vi.fn().mockResolvedValue(SEALED), removeIndexEntry: vi.fn().mockResolvedValue(undefined) };
+            const blobStore = new InMemoryBlobStore();
+            const del = vi.spyOn(blobStore, "delete");
+            const context = makeContext({
+                zeroAccessWriter: writerFake as any,
+                scanPipeline: scanned(false),
+                blobStore,
+                folderRepo: { find: vi.fn().mockRejectedValue(new Error("folders down")) } as any,
+            });
+            draft(context);
+
+            await expect(new RopSubmitMessageHandler().handle(new BufferReader(buildRequest({})), new BufferWriter(), context)).rejects.toThrow("folders down");
+
+            expect(del).toHaveBeenCalledWith(SEALED.bodyBlobKey);
+            expect(writerFake.removeIndexEntry).toHaveBeenCalledWith("index-1");
+            expect(del).toHaveBeenCalledWith(expect.stringMatching(/^sanitized\//));
+            expect((blobStore as any).store.size).toBe(0);
+            expect((context.messageRepo as any).create).not.toHaveBeenCalled();
+        });
+
+        it("Removes the sanitized HTML when sealing fails, and a readable copy's body when its create fails.", async () => {
+            const sealFails = { sealRaw: vi.fn().mockRejectedValue(new Error("policy lookup failed")), removeIndexEntry: vi.fn() };
+            const sealStore = new InMemoryBlobStore();
+            const sealing = makeContext({ zeroAccessWriter: sealFails as any, scanPipeline: scanned(false), blobStore: sealStore });
+            draft(sealing);
+            await expect(new RopSubmitMessageHandler().handle(new BufferReader(buildRequest({})), new BufferWriter(), sealing)).rejects.toThrow("policy lookup failed");
+            expect(sealFails.removeIndexEntry).not.toHaveBeenCalled();
+            expect((sealStore as any).store.size).toBe(0);
+
+            const readableStore = new InMemoryBlobStore();
+            const del = vi.spyOn(readableStore, "delete");
+            const readable = makeContext({
+                scanPipeline: scanned(false),
+                blobStore: readableStore,
+                messageRepo: { create: vi.fn().mockRejectedValue(new Error("insert failed")) } as any,
+            });
+            draft(readable);
+            await expect(new RopSubmitMessageHandler().handle(new BufferReader(buildRequest({})), new BufferWriter(), readable)).rejects.toThrow("insert failed");
+            expect(del).toHaveBeenCalledWith(expect.stringMatching(/^bodies\//));
+            expect((readableStore as any).store.size).toBe(0);
         });
     });
 
