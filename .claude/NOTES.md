@@ -963,3 +963,15 @@ While rolling the day's restapi 0.25.1 dependency bump out to every plugin, ran 
 ## 2026-10-26: Publish gate
 
 - **Publish only from the tag's own green Build.** A release pushes `main` and its tag at the same commit, and each push runs Build. The old Publish ran after *any* green Build of a tagged commit, so a failed Build on the other ref (activesync v1.2.0's tag run, web-client v0.37.0's `main` run) didn't stop the release, and the second Publish run always failed as a duplicate. `.github/workflows/publish.yml`'s `check` job now runs only for a tag push's Build, verifies the tag points at the commit on `main`, and waits until every Build of that commit has finished, refusing if any did not succeed (a green rerun triggers Publish again). Same change as activesync 9c0f71d, which was verified with a real release (activesync 1.2.1).
+
+## Agent model assignments (JP, 2026-10-28)
+
+Standing rule for every AI agent working on this project (applies to all RapidMX and RapidREST repositories):
+
+| Kind of work | Model |
+|---|---|
+| Design (specs, plans, architecture proposals) | Opus 5.5 (`claude-opus-5-5`) |
+| Architectural review | Opus 5.5 (`claude-opus-5-5`) |
+| Code review (finding and verifying defects in diffs or code) | Sonnet 5.5 (`claude-sonnet-5-5`) |
+| Fixes (implementing review findings and other code changes) | Sonnet 5.5 (`claude-sonnet-5-5`) |
+| Simple operations (file operations, renames, project initialization and similar mechanical tasks) | Haiku 5.5 (`claude-haiku-5-5`) |
